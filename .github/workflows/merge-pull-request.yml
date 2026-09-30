@@ -37,7 +37,7 @@ jobs:
       - run: semantic-release
         id: next-version
         env:
-          GITHUB_TOKEN: ${{ secrets.CD_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
 
   build-and-deploy:
     name: Build and deploy to dev
