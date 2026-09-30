@@ -1,0 +1,95 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  tests:
+    name: Tests
+    uses: ./.github/workflows/tests.yml
+
+  release:
+    name: Release
+    needs: tests
+    runs-on: ubuntu-latest
+    outputs:
+      new-release-published: ${{ steps.next-version.outputs.new-release-published }}
+      new-release-git-tag: ${{ steps.next-version.outputs.new-release-git-tag }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ssh-key: ${{ secrets.CD_DEPLOY_KEY }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: lts/*
+
+      - run: npm i semantic-release-export-data
+      - run: npm i -g semantic-release @semantic-release/{git,changelog}
+      - run: semantic-release
+        id: next-version
+        env:
+          GITHUB_TOKEN: ${{ secrets.CD_GITHUB_TOKEN }}
+
+  build-and-deploy:
+    name: Build and deploy to dev
+    needs: release
+    if: ${{ needs.release.outputs.new-release-git-tag }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release.outputs.new-release-git-tag }}
+
+      - name: Check out the github actions repo
+        uses: actions/checkout@v4
+        with:
+          repository: rrivirr/github-actions
+          ref: v1.3.6
+          token: ${{ secrets.GH_ACTIONS_ACCESS_TOKEN }}
+          path: ./.github/actions/rrivirr-github-actions
+
+      - name: Prepare deployment
+        uses: ./.github/actions/rrivirr-github-actions/prepare-deployment
+        with:
+          ENV: dev
+          # This line is required to pass the AWS role to the action
+          AWS_ROLE_ARN: ${{ secrets[format('{0}_GITHUB_ACTIONS_AWS_ROLE_ARN', 'DEV')] }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DigitalOcean Registry
+        run: doctl registry login --access-token ${{ secrets.TEMP_REGISTRY_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./deployment/Dockerfile
+          push: true
+          tags: registry.digitalocean.com/rriv/web:${{ needs.release.outputs.new-release-git-tag }}
+
+      - name: Install kustomize
+        run: curl -sS "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+
+      - name: Update image tag
+        run: (cd deployment/overlays/dev && kustomize edit set image registry.digitalocean.com/rriv/web:${{ needs.release.outputs.new-release-git-tag }})
+
+      - name: apply update
+        run: kustomize build deployment/overlays/dev | kubectl apply --wait -f -
+
+      - name: Rollout status
+        run: kubectl -n web rollout status deployment/web --timeout=180s

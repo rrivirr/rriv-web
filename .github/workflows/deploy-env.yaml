@@ -1,0 +1,66 @@
+name: Deploy to Environment
+
+on:
+  workflow_dispatch:
+    inputs:
+      env:
+        description: "Environment to deploy to"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      tag:
+        description: "Specify tag to deploy (semantic-release tag, e.g. v1.2.3)"
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    env:
+      ENV: ${{ github.event.inputs.env }}
+      TAG: ${{ github.event.inputs.tag }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag }}
+
+      - name: Check out the github actions repo
+        uses: actions/checkout@v4
+        with:
+          repository: rrivirr/github-actions
+          ref: v1.3.6
+          token: ${{ secrets.GH_ACTIONS_ACCESS_TOKEN }}
+          path: ./.github/actions/rrivirr-github-actions
+
+      - name: capitalize env
+        run: |
+          env=${{ env.ENV }}
+          CAPITALIZED="${env^^}"
+          echo "CAPITALIZED_ENV=$CAPITALIZED" >> $GITHUB_ENV
+
+      - name: Prepare deployment
+        uses: ./.github/actions/rrivirr-github-actions/prepare-deployment
+        with:
+          ENV: ${{ env.ENV }}
+          # This line is required to pass the AWS role to the action
+          AWS_ROLE_ARN: ${{ secrets[format('{0}_GITHUB_ACTIONS_AWS_ROLE_ARN', env.CAPITALIZED_ENV)] }}
+
+      - name: Install kustomize
+        run: curl -sS "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+
+      - name: Update image tag
+        run: (cd deployment/overlays/${{ env.ENV }} && kustomize edit set image registry.digitalocean.com/rriv/web:${{ env.TAG }})
+
+      - name: apply update
+        run: kustomize build deployment/overlays/${{ env.ENV }} | kubectl apply --wait -f -
+
+      - name: Rollout status
+        run: kubectl -n web rollout status deployment/web --timeout=180s

@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  template:
+    spec:
+      containers:
+        - name: web
+          env:
+            - name: RRIV_API_BASE_URL
+              value: https://api.rriv.org/rriv
+            - name: RRIV_DATA_API_URL
+              value: https://api.rriv.org/data
+            - name: RRIV_KEYCLOAK_URL
+              value: https://auth.rriv.org
+            - name: RRIV_KEYCLOAK_REALM
+              value: rriv-beta-prod
+            - name: RRIV_KEYCLOAK_CLIENT_ID
+              value: rriv-web

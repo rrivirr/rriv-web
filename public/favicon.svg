@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
+  <defs>
+    <linearGradient id="rriv-favicon" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#3fe3d1"/>
+      <stop offset="100%" stop-color="#0b877f"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="44" height="44" rx="13" fill="url(#rriv-favicon)"/>
+  <g fill="none" stroke="#032a2a" stroke-width="2.6" stroke-linecap="round">
+    <path d="M10 18c3.5 0 5-3 9-3s5.5 3 9 3 5-3 9-3" opacity="0.9"/>
+    <path d="M10 26c3.5 0 5-3 9-3s5.5 3 9 3 5-3 9-3" opacity="0.6"/>
+  </g>
+  <circle cx="34" cy="34" r="4" fill="#032a2a"/>
+  <circle cx="34" cy="34" r="1.6" fill="#3fe3d1"/>
+</svg>
