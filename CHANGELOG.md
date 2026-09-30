@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/rrivirr/rriv-web/compare/v1.0.0...v1.0.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* use github token ([8b8bbaf](https://github.com/rrivirr/rriv-web/commit/8b8bbafa4d88dcee63757ba2ab9729412446d362))
+
 # 1.0.0 (2026-09-30)
 
 
