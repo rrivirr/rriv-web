@@ -17,12 +17,25 @@ window.__RRIV_CONFIG__ = {
 };
 EOF
 
+# Reduce a URL to its origin (scheme://host[:port]). CSP host sources do NOT
+# prefix-match a path — `https://host/rriv` only allows the literal `/rriv`,
+# not `/rriv/context` — so connect-src/frame-src must use origins.
+origin() {
+  printf '%s' "$1" | sed -E 's#^([a-zA-Z][a-zA-Z0-9+.-]*://[^/]+).*#\1#'
+}
+
+API_ORIGIN=$(origin "${RRIV_API_BASE_URL:-}")
+DATA_ORIGIN=$(origin "${RRIV_DATA_API_URL:-}")
+KC_ORIGIN=$(origin "${RRIV_KEYCLOAK_URL:-}")
+ORIGINS=$(printf '%s\n' "$API_ORIGIN" "$DATA_ORIGIN" "$KC_ORIGIN" \
+  | awk 'NF && !seen[$0]++' | tr '\n' ' ')
+
 # Content-Security-Policy. `script-src 'self'` is strict: the app has no inline
 # scripts (the theme bootstrap is /theme-init.js). Style needs 'unsafe-inline'
 # for React/Recharts inline style attributes. `connect-src`/`frame-src` include
 # the per-environment Keycloak origin (silent-renew iframe + token/discovery)
 # and the API origins, which are only known at runtime.
-CSP="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ${RRIV_API_BASE_URL:-} ${RRIV_DATA_API_URL:-} ${RRIV_KEYCLOAK_URL:-}; frame-src 'self' ${RRIV_KEYCLOAK_URL:-}; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+CSP="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ${ORIGINS}; frame-src 'self' ${KC_ORIGIN}; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
 
 mkdir -p /etc/nginx/rriv
 cat > "$HEADERS_FILE" <<EOF
