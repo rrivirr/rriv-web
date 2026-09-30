@@ -110,7 +110,7 @@ export function AdminPage() {
           <Stat
             label={`Queue (${metrics.data.queue.name})`}
             value={metrics.data.queue.total}
-            hint={`Jobs in the pg-boss "${metrics.data.queue.name}" queue. The number counts every retained row for the queue (created, active, retry, completed), not just waiting work; a backlog older than 10 minutes affects health.`}
+            hint={`Jobs in the pg-boss "${metrics.data.queue.name}" queue that have not finished yet (created, retry, active). Completed jobs are kept as history but are not counted; a backlog older than 10 minutes affects health.`}
           />
           <Stat
             label={`DLQ (${metrics.data.dlq.name})`}

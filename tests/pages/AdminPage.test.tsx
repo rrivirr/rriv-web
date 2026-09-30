@@ -126,6 +126,7 @@ describe("AdminPage", () => {
     expect(screen.getByText(/Share of tracked resources/)).toBeInTheDocument();
     expect(screen.getByText(/parked in the DLQ/)).toBeInTheDocument();
     expect(screen.getByText(/Dead-letter queue/)).toBeInTheDocument();
+    expect(screen.getByText(/have not finished yet/)).toBeInTheDocument();
     expect(screen.getByText(/no queue backlog/)).toBeInTheDocument();
 
     // Each tile is associated with its tooltip for screen readers.
