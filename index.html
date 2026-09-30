@@ -7,24 +7,7 @@
     <meta name="description" content="RRIV — environmental monitoring platform" />
     <title>RRIV</title>
     <script src="/config.js"></script>
-    <script>
-      // Apply the saved (or system) theme before first paint to avoid a flash.
-      (function () {
-        try {
-          var stored = localStorage.getItem("rriv-theme");
-          var theme =
-            stored === "light" || stored === "dark"
-              ? stored
-              : window.matchMedia("(prefers-color-scheme: light)").matches
-                ? "light"
-                : "dark";
-          document.documentElement.classList.add(theme);
-          document.documentElement.style.colorScheme = theme;
-        } catch (_) {
-          document.documentElement.classList.add("dark");
-        }
-      })();
-    </script>
+    <script src="/theme-init.js"></script>
   </head>
   <body>
     <div id="root"></div>

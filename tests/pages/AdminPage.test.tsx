@@ -101,7 +101,7 @@ describe("AdminPage", () => {
     expect(screen.getByText(/2 attempt/)).toBeInTheDocument();
     expect(screen.getByText(/"message":"timed out"/)).toBeInTheDocument();
     expect(screen.getByText("50%")).toBeInTheDocument();
-    expect(screen.getByText(/rriv-dlq/)).toBeInTheDocument();
+    expect(screen.getByText("DLQ (rriv-dlq)")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() =>
@@ -112,6 +112,30 @@ describe("AdminPage", () => {
     expect(
       await screen.findByText("Re-queued 3 resource(s)."),
     ).toBeInTheDocument();
+  });
+
+  it("explains each metric tile with a tooltip", async () => {
+    server.use(me(true));
+    baseHandlers();
+
+    renderWithProviders(<AdminPage />);
+
+    // The six tiles each expose a tooltip describing what the number means.
+    const tooltips = await screen.findAllByRole("tooltip");
+    expect(tooltips).toHaveLength(6);
+    expect(screen.getByText(/Share of tracked resources/)).toBeInTheDocument();
+    expect(screen.getByText(/parked in the DLQ/)).toBeInTheDocument();
+    expect(screen.getByText(/Dead-letter queue/)).toBeInTheDocument();
+    expect(screen.getByText(/no queue backlog/)).toBeInTheDocument();
+
+    // Each tile is associated with its tooltip for screen readers.
+    const inSync = screen.getByText("In sync").closest("div");
+    expect(inSync).toHaveAttribute("aria-describedby");
+    const describedBy = inSync!.getAttribute("aria-describedby")!;
+    expect(document.getElementById(describedBy)).toHaveAttribute(
+      "role",
+      "tooltip",
+    );
   });
 
   it("shows an empty state with no rows", async () => {

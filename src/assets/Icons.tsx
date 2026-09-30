@@ -177,6 +177,17 @@ export function IconAlert(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+/** Circle with an "i" — inline help / tooltip affordance. */
+export function IconInfo(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Base {...props}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 11v5" />
+      <path d="M12 7.5h.01" />
+    </Base>
+  );
+}
+
 /** Magnifier — used by the library search controls. */
 export function IconSearch(props: SVGProps<SVGSVGElement>) {
   return (
