@@ -1,3 +1,10 @@
+## [1.0.4](https://github.com/rrivirr/rriv-web/compare/v1.0.3...v1.0.4) (2026-09-30)
+
+
+### Bug Fixes
+
+* update admin dashboard ([eaf652c](https://github.com/rrivirr/rriv-web/commit/eaf652c2d441d26dfae19cb9b23ed69b9c115d80))
+
 ## [1.0.3](https://github.com/rrivirr/rriv-web/compare/v1.0.2...v1.0.3) (2026-09-30)
 
 
