@@ -11,21 +11,29 @@ const api = "http://api.test";
 const metrics = {
   generatedAt: "2026-01-01T00:00:00Z",
   health: "degraded",
+  healthReasons: ["a sync has been pending for 22 min"],
   authSync: {
     byStatus: { pending: 1, synced: 2, failed: 1 },
     total: 4,
     oldestFailedSeconds: 30,
-    stuckPendingSeconds: null,
+    oldestPendingSeconds: 1320,
+    stuckPendingSeconds: 1320,
     inSyncPercent: 50,
   },
   queue: {
     name: "rriv-sync",
     available: true,
     total: 1,
+    byState: { created: 1 },
+    oldestQueuedSeconds: 60,
+  },
+  dlq: {
+    name: "rriv-dlq",
+    available: true,
+    depth: 0,
     byState: {},
     oldestQueuedSeconds: null,
   },
-  dlq: { name: "rriv-dlq", available: true, depth: 0, byState: {} },
   notifications: { unread: 0 },
   recentFailures: [],
 };
@@ -100,8 +108,19 @@ describe("AdminPage", () => {
     expect(screen.getByText("context:c1")).toBeInTheDocument();
     expect(screen.getByText(/2 attempt/)).toBeInTheDocument();
     expect(screen.getByText(/"message":"timed out"/)).toBeInTheDocument();
-    expect(screen.getByText("50%")).toBeInTheDocument();
-    expect(screen.getByText("DLQ (rriv-dlq)")).toBeInTheDocument();
+
+    // The banner explains *why* health isn't Ok.
+    const banner = screen.getByRole("status");
+    expect(banner).toHaveTextContent("Degraded");
+    expect(banner).toHaveTextContent("a sync has been pending for 22 min");
+
+    // Tiles are self-describing (value + context, not a bare number).
+    expect(screen.getByText("2 of 4")).toBeInTheDocument();
+    expect(screen.getByText("50% converged")).toBeInTheDocument();
+    expect(screen.getByText("oldest 22 min")).toBeInTheDocument();
+    expect(screen.getByText("1 waiting")).toBeInTheDocument();
+    expect(screen.getByText(/created 1 · retry 0 · active 0/)).toBeInTheDocument();
+    expect(screen.getByText("nothing parked")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() =>
@@ -120,19 +139,20 @@ describe("AdminPage", () => {
 
     renderWithProviders(<AdminPage />);
 
-    // The six tiles each expose a tooltip describing what the number means.
+    // The five tiles each expose a tooltip describing what the number means.
     const tooltips = await screen.findAllByRole("tooltip");
-    expect(tooltips).toHaveLength(6);
-    expect(screen.getByText(/Share of tracked resources/)).toBeInTheDocument();
+    expect(tooltips).toHaveLength(5);
+    expect(screen.getByText(/synced \/ total tracked/)).toBeInTheDocument();
     expect(screen.getByText(/parked in the DLQ/)).toBeInTheDocument();
     expect(screen.getByText(/Dead-letter queue/)).toBeInTheDocument();
     expect(screen.getByText(/have not finished yet/)).toBeInTheDocument();
-    expect(screen.getByText(/no queue backlog/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/backlog older than 10 minutes/),
+    ).toBeInTheDocument();
 
     // Each tile is associated with its tooltip for screen readers.
-    const inSync = screen.getByText("In sync").closest("div");
-    expect(inSync).toHaveAttribute("aria-describedby");
-    const describedBy = inSync!.getAttribute("aria-describedby")!;
+    const tile = screen.getByRole("button", { name: /In sync/ });
+    const describedBy = tile.getAttribute("aria-describedby")!;
     expect(document.getElementById(describedBy)).toHaveAttribute(
       "role",
       "tooltip",

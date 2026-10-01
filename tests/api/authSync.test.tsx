@@ -15,15 +15,29 @@ const api = "http://api.test";
 const metrics = {
   generatedAt: "2026-01-01T00:00:00Z",
   health: "degraded",
+  healthReasons: ["a sync has been pending for 22 min"],
   authSync: {
     byStatus: { pending: 1, synced: 2, failed: 1 },
     total: 4,
     oldestFailedSeconds: 10,
-    stuckPendingSeconds: null,
+    oldestPendingSeconds: 1320,
+    stuckPendingSeconds: 1320,
     inSyncPercent: 50,
   },
-  queue: { name: "sync", available: true, total: 1, byState: {}, oldestQueuedSeconds: null },
-  dlq: { name: "dlq", available: true, depth: 0, byState: {} },
+  queue: {
+    name: "sync",
+    available: true,
+    total: 1,
+    byState: { created: 1 },
+    oldestQueuedSeconds: null,
+  },
+  dlq: {
+    name: "dlq",
+    available: true,
+    depth: 0,
+    byState: {},
+    oldestQueuedSeconds: null,
+  },
   notifications: { unread: 1 },
   recentFailures: [],
 };

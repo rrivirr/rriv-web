@@ -28,10 +28,13 @@ export interface AuthSyncFilters {
 export interface SystemMetrics {
   generatedAt: string;
   health: "ok" | "degraded" | "critical";
+  /** Plain-language reasons health isn't `ok` (empty when it is). */
+  healthReasons: string[];
   authSync: {
     byStatus: { pending: number; synced: number; failed: number };
     total: number;
     oldestFailedSeconds: number | null;
+    oldestPendingSeconds: number | null;
     stuckPendingSeconds: number | null;
     inSyncPercent: number;
   };
@@ -47,6 +50,7 @@ export interface SystemMetrics {
     available: boolean;
     depth: number;
     byState: Record<string, number>;
+    oldestQueuedSeconds: number | null;
   };
   notifications: { unread: number };
   recentFailures: Array<{
