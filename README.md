@@ -79,7 +79,7 @@ API trusts — the API's issuer is `${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}`).
    - Valid redirect URIs: `http://localhost:5173/*`
    - Web origins: `http://localhost:5173`
 4. **Advanced** tab:
-   - Proof Key for Code Exchange Code Challenge Method: **S256**
+   - Proof Key for Code Exchange Code Challenge Method (PKCE method): **S256**
    - Valid post logout redirect URIs: `http://localhost:5173/*`
 
 ## Library
