@@ -95,4 +95,35 @@ describe("DevicesPage", () => {
       ),
     );
   });
+
+  it("paginates and resets to the first page on search", async () => {
+    const user = userEvent.setup();
+    const offsets: string[] = [];
+    server.use(
+      http.get(devicesUrl, ({ request }) => {
+        const url = new URL(request.url);
+        offsets.push(url.searchParams.get("offset") ?? "0");
+        const start = Number(url.searchParams.get("offset") ?? 0);
+        return HttpResponse.json(
+          Array.from({ length: 24 }, (_, index) => ({
+            ...boundDevice,
+            id: `d${start + index}`,
+            serialNumber: `S${start + index}`,
+            uniqueName: `logger-${start + index}`,
+          })),
+        );
+      }),
+    );
+
+    renderWithProviders(<DevicesPage />);
+    expect(await screen.findByText("logger-0")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(offsets).toContain("24"));
+
+    await user.click(screen.getByRole("button", { name: "Previous" }));
+    await waitFor(() =>
+      expect(screen.getByText("logger-0")).toBeInTheDocument(),
+    );
+  });
 });

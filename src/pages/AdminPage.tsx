@@ -10,11 +10,14 @@ import { useMe } from "@/api/me";
 import { IconAlert, IconCheck, IconInfo } from "@/assets/Icons";
 import { Badge } from "@/components/Badge";
 import { EmptyState } from "@/components/EmptyState";
+import { Pager } from "@/components/Pager";
 import { QueryError } from "@/components/QueryError";
 import { Skeleton } from "@/components/Skeleton";
 import { Spinner } from "@/components/Spinner";
 import { AdminsCard } from "@/components/AdminsCard";
 import { formatRelative } from "@/lib/format";
+
+const PAGE_SIZE = 25;
 
 type StatusFilter = AuthSyncStatus | "all";
 type Tone = "neutral" | "success" | "warning" | "danger";
@@ -50,8 +53,11 @@ const hasBacklog = (oldestQueuedSeconds: number | null): boolean =>
 export function AdminPage() {
   const me = useMe();
   const [status, setStatus] = useState<StatusFilter>("failed");
+  const [offset, setOffset] = useState(0);
   const query = useAuthSyncs({
     status: status === "all" ? undefined : status,
+    limit: PAGE_SIZE,
+    offset,
   });
   const resync = useResync();
   const resyncAll = useResyncAllFailed();
@@ -71,6 +77,7 @@ export function AdminPage() {
   }
 
   const rows = query.data?.items ?? [];
+  const total = query.data?.total;
   const metricsData = metrics.data;
   const byState = metricsData?.queue.byState ?? {};
 
@@ -86,7 +93,10 @@ export function AdminPage() {
         <div className="flex items-center gap-2">
           <select
             value={status}
-            onChange={(event) => setStatus(event.target.value as StatusFilter)}
+            onChange={(event) => {
+              setStatus(event.target.value as StatusFilter);
+              setOffset(0);
+            }}
             className="btn"
             aria-label="Filter by status"
           >
@@ -232,6 +242,19 @@ export function AdminPage() {
           ))}
         </div>
       )}
+
+      {!query.isError && !query.isPending && rows.length > 0 ? (
+        <Pager
+          offset={offset}
+          pageSize={PAGE_SIZE}
+          count={rows.length}
+          total={total}
+          isFetching={query.isFetching}
+          onPrev={() => setOffset((page) => Math.max(0, page - PAGE_SIZE))}
+          onNext={() => setOffset((page) => page + PAGE_SIZE)}
+          noun="resource"
+        />
+      ) : null}
 
       <AdminsCard />
     </div>

@@ -12,6 +12,7 @@ import type { LibraryFilters, LibraryKind } from "@/api/library";
 import type { LibraryConfigSummary } from "@/api/types";
 import { Badge } from "@/components/Badge";
 import { EmptyState } from "@/components/EmptyState";
+import { Pager } from "@/components/Pager";
 import { SectionCard } from "@/components/SectionCard";
 import { Skeleton } from "@/components/Skeleton";
 import { formatRelative } from "@/lib/format";
@@ -115,9 +116,6 @@ export function LibraryPage() {
     }
     resetTo();
   }
-
-  const canPrev = offset > 0;
-  const canNext = entries.length === PAGE_SIZE && offset + PAGE_SIZE <= MAX_OFFSET;
 
   return (
     <div className="space-y-6">
@@ -262,32 +260,19 @@ export function LibraryPage() {
         </div>
       )}
 
-      {(canPrev || canNext) && !query.isError ? (
-        <div className="flex items-center justify-between gap-4">
-          <button
-            type="button"
-            className="btn btn-ghost"
-            disabled={!canPrev || query.isFetching}
-            onClick={() => setOffset((current) => Math.max(0, current - PAGE_SIZE))}
-          >
-            Previous
-          </button>
-          <span className="text-xs text-fg-subtle">
-            Showing {entries.length} result{entries.length === 1 ? "" : "s"}
-          </span>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            disabled={!canNext || query.isFetching}
-            onClick={() =>
-              setOffset((current) =>
-                Math.min(MAX_OFFSET, current + PAGE_SIZE),
-              )
-            }
-          >
-            Next
-          </button>
-        </div>
+      {!query.isError ? (
+        <Pager
+          offset={offset}
+          pageSize={PAGE_SIZE}
+          count={entries.length}
+          maxOffset={MAX_OFFSET}
+          isFetching={query.isFetching}
+          onPrev={() =>
+            setOffset((current) => Math.max(0, current - PAGE_SIZE))}
+          onNext={() =>
+            setOffset((current) => Math.min(MAX_OFFSET, current + PAGE_SIZE))}
+          noun="config"
+        />
       ) : null}
     </div>
   );

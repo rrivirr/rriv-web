@@ -12,17 +12,14 @@ import {
 } from "recharts";
 import { IconActivity, IconAlert, IconRefresh } from "@/assets/Icons";
 import { numericSeriesKeys, toChartData, useReadings } from "@/api/telemetry";
-import type {
-  ConfigHistoryItem,
-  Device,
-  FirmwareHistoryItem,
-} from "@/api/types";
+import { useConfigHistory, useFirmwareHistory } from "@/api/configs";
+import type { Device } from "@/api/types";
 import { Badge } from "@/components/Badge";
 import { EmptyState } from "@/components/EmptyState";
 import { JsonBlock } from "@/components/JsonBlock";
 import { QueryError } from "@/components/QueryError";
 import { Skeleton } from "@/components/Skeleton";
-import { formatRelative } from "@/lib/format";
+import { formatDate, formatRelative } from "@/lib/format";
 
 const PRESETS = [
   { id: "1h", label: "1h", hours: 1 },
@@ -46,29 +43,7 @@ const SERIES_COLORS = [
   "#c084fc",
 ];
 
-/** The config rows in effect at time `t`: latest row per name at or before `t`. */
-function configAt(history: ConfigHistoryItem[], t: number): ConfigHistoryItem[] {
-  const byName = new Map<string, ConfigHistoryItem>();
-  for (const item of history) {
-    const createdAt = Date.parse(item.createdAt);
-    if (!Number.isFinite(createdAt) || createdAt > t) continue;
-    const existing = byName.get(item.name);
-    if (!existing || createdAt > Date.parse(existing.createdAt)) {
-      byName.set(item.name, item);
-    }
-  }
-  return [...byName.values()];
-}
-
-export function DeviceTelemetry({
-  device,
-  history,
-  firmware,
-}: {
-  device: Device;
-  history: ConfigHistoryItem[];
-  firmware: FirmwareHistoryItem[];
-}) {
+export function DeviceTelemetry({ device }: { device: Device }) {
   const eui = device.DeviceEuis?.[0]?.eui;
   const [preset, setPreset] = useState<PresetId>("24h");
   const [hidden, setHidden] = useState<Set<string>>(new Set());
@@ -84,6 +59,30 @@ export function DeviceTelemetry({
   const keys = useMemo(() => numericSeriesKeys(rows), [rows]);
   const chartData = useMemo(() => toChartData(rows, keys), [rows, keys]);
   const matchedEui = query.data?.eui ?? eui;
+
+  // Markers are scoped to the visible chart window, not the whole history, so
+  // they stay aligned with the chart and aren't clipped by the API's page cap.
+  const markerWindow = { from: range.start.toISOString() };
+  const markersConfigQuery = useConfigHistory(
+    device.serialNumber,
+    markerWindow,
+    { enabled: Boolean(eui) },
+  );
+  const markersFirmwareQuery = useFirmwareHistory(
+    { deviceId: device.id },
+    markerWindow,
+    { enabled: Boolean(eui) },
+  );
+
+  const history = useMemo(() => {
+    const data = markersConfigQuery.data;
+    if (!data) return [];
+    return [...data.dataloggerConfigs, ...data.sensorConfigs];
+  }, [markersConfigQuery.data]);
+  const firmware = useMemo(
+    () => markersFirmwareQuery.data ?? [],
+    [markersFirmwareQuery.data],
+  );
 
   const markers = useMemo(() => {
     const config = history.map((item) => ({
@@ -103,10 +102,29 @@ export function DeviceTelemetry({
       .sort((a, b) => b.t - a.t);
   }, [history, firmware]);
 
-  const asAtConfig = useMemo(
-    () => (selectedTime == null ? [] : configAt(history, selectedTime)),
-    [history, selectedTime],
+  // Point-in-time state is resolved server-side (`asAt`), so it stays correct
+  // even when the applied-config history exceeds one page.
+  const asAtIso = selectedTime == null
+    ? undefined
+    : new Date(selectedTime).toISOString();
+  const asAtConfigQuery = useConfigHistory(
+    device.serialNumber,
+    { asAt: asAtIso },
+    { enabled: selectedTime != null },
   );
+  const asAtFirmwareQuery = useFirmwareHistory(
+    { deviceId: device.id },
+    { asAt: asAtIso },
+    { enabled: selectedTime != null },
+  );
+  const asAtConfig = [
+    ...(asAtConfigQuery.data?.sensorConfigs ?? []),
+    ...(asAtConfigQuery.data?.dataloggerConfigs ?? []),
+  ];
+  const asAtFirmware = asAtFirmwareQuery.data?.[0] ?? null;
+  const asAtLoading = asAtConfigQuery.isLoading ||
+    asAtFirmwareQuery.isLoading;
+  const asAtError = asAtConfigQuery.isError || asAtFirmwareQuery.isError;
 
   function toggleSeries(key: string) {
     setHidden((current) => {
@@ -297,15 +315,15 @@ export function DeviceTelemetry({
             <span className="inline-flex items-center gap-1.5">
               <span className="h-0.5 w-4 rounded bg-[#f59e0b]" /> firmware change
             </span>
-            <span>Click the chart or a marker to see the config in effect.</span>
+            <span>Click the chart or a marker to see the state in effect.</span>
           </p>
 
-          {/* As-at config */}
+          {/* As-at state */}
           {selectedTime != null ? (
             <div className="rounded-xl border border-border bg-surface-2/40 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="text-sm text-fg">
-                  Config in effect at{" "}
+                  In effect at{" "}
                   <span className="font-medium">
                     {new Date(selectedTime).toLocaleString()}
                   </span>
@@ -319,20 +337,49 @@ export function DeviceTelemetry({
                 </button>
               </div>
               <div className="mt-3 space-y-3">
-                {asAtConfig.length === 0 ? (
+                {asAtError ? (
                   <p className="text-xs text-fg-subtle">
-                    No config was recorded before this time.
+                    Could not load the state at this time.
                   </p>
+                ) : asAtLoading ? (
+                  <p className="text-xs text-fg-subtle">Loading…</p>
                 ) : (
-                  asAtConfig.map((item) => (
-                    <JsonBlock
-                      key={item.id}
-                      label={`${item.name} · ${
-                        item.sensorDriverId ? "sensor" : "datalogger"
-                      }`}
-                      value={item.config}
-                    />
-                  ))
+                  <>
+                    {asAtConfig.length === 0 ? (
+                      <p className="text-xs text-fg-subtle">
+                        No config was recorded before this time.
+                      </p>
+                    ) : (
+                      asAtConfig.map((item) => (
+                        <JsonBlock
+                          key={item.id}
+                          label={`${item.name} · ${
+                            item.sensorDriverId ? "sensor" : "datalogger"
+                          }`}
+                          value={item.config}
+                        />
+                      ))
+                    )}
+
+                    <p className="rounded-lg border border-border bg-surface-2/40 px-3 py-2 text-xs">
+                      <span className="text-fg-subtle">Firmware: </span>
+                      {asAtFirmware ? (
+                        <>
+                          <span className="font-mono text-fg">
+                            v{asAtFirmware.version}
+                          </span>
+                          <span className="text-fg-subtle">
+                            {" "}· installed{" "}
+                            {formatDate(asAtFirmware.installedAt)}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-fg-subtle">
+                          none recorded before this time
+                        </span>
+                      )}
+                    </p>
+                  </>
                 )}
               </div>
             </div>

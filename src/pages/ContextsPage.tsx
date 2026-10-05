@@ -8,10 +8,13 @@ import type { Context } from "@/api/types";
 import { useAuth } from "@/auth/useAuth";
 import { Badge } from "@/components/Badge";
 import { EmptyState } from "@/components/EmptyState";
+import { Pager } from "@/components/Pager";
 import { QueryError } from "@/components/QueryError";
 import { Skeleton } from "@/components/Skeleton";
 import { Spinner } from "@/components/Spinner";
 import { formatRelative } from "@/lib/format";
+
+const PAGE_SIZE = 24;
 
 type Ownership = "all" | "owned" | "shared";
 type Status = "active" | "ended" | "all";
@@ -34,17 +37,21 @@ export function ContextsPage() {
   const [search, setSearch] = useState("");
   const [ownership, setOwnership] = useState<Ownership>("all");
   const [status, setStatus] = useState<Status>("active");
+  const [offset, setOffset] = useState(0);
 
   const query = useContexts({
     search: search || undefined,
     ended: status === "all" ? undefined : status === "ended",
+    limit: PAGE_SIZE,
+    offset,
   });
   const createContext = useCreateContext();
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
 
   const subjectId = user?.profile?.sub;
-  const contexts = (query.data ?? []).filter((context) => {
+  const raw = query.data ?? [];
+  const contexts = raw.filter((context) => {
     const owned = context.Account?.id === subjectId;
     if (ownership === "owned") return owned;
     if (ownership === "shared") return !owned;
@@ -54,6 +61,7 @@ export function ContextsPage() {
   function onSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSearch(searchInput.trim());
+    setOffset(0);
   }
 
   function onCreate(event: FormEvent<HTMLFormElement>) {
@@ -156,7 +164,10 @@ export function ContextsPage() {
         </div>
         <select
           value={ownership}
-          onChange={(event) => setOwnership(event.target.value as Ownership)}
+          onChange={(event) => {
+            setOwnership(event.target.value as Ownership);
+            setOffset(0);
+          }}
           className="field sm:w-44"
           aria-label="Ownership"
         >
@@ -168,7 +179,10 @@ export function ContextsPage() {
         </select>
         <select
           value={status}
-          onChange={(event) => setStatus(event.target.value as Status)}
+          onChange={(event) => {
+            setStatus(event.target.value as Status);
+            setOffset(0);
+          }}
           className="field sm:w-40"
           aria-label="Status"
         >
@@ -187,22 +201,41 @@ export function ContextsPage() {
         <QueryError error={query.error} label="contexts" />
       ) : query.isPending ? (
         <ListSkeleton />
-      ) : contexts.length === 0 ? (
+      ) : raw.length === 0 ? (
         <EmptyState
           icon={<IconWaves className="h-5 w-5" />}
           title="No contexts found"
           description="Create a context in the RRIV app or CLI to group devices over a deployment period."
         />
       ) : (
-        <ul className="grid gap-3 sm:grid-cols-2">
-          {contexts.map((context) => (
-            <ContextRow
-              key={context.id}
-              context={context}
-              owned={context.Account?.id === subjectId}
-            />
-          ))}
-        </ul>
+        <>
+          {contexts.length === 0 ? (
+            <p className="text-sm text-fg-subtle">
+              No {OWNERSHIP_LABELS[ownership].toLowerCase()} contexts on this
+              page — try the next page.
+            </p>
+          ) : (
+            <ul className="grid gap-3 sm:grid-cols-2">
+              {contexts.map((context) => (
+                <ContextRow
+                  key={context.id}
+                  context={context}
+                  owned={context.Account?.id === subjectId}
+                />
+              ))}
+            </ul>
+          )}
+          <Pager
+            offset={offset}
+            pageSize={PAGE_SIZE}
+            count={contexts.length}
+            rawCount={raw.length}
+            isFetching={query.isFetching}
+            onPrev={() => setOffset((page) => Math.max(0, page - PAGE_SIZE))}
+            onNext={() => setOffset((page) => page + PAGE_SIZE)}
+            noun="context"
+          />
+        </>
       )}
     </div>
   );

@@ -56,4 +56,32 @@ describe("NotificationsPage", () => {
 
     expect(await screen.findByText("No notifications")).toBeInTheDocument();
   });
+
+  it("paginates with a total", async () => {
+    const user = userEvent.setup();
+    const offsets: string[] = [];
+    server.use(
+      http.get(notificationsUrl, ({ request }) => {
+        const url = new URL(request.url);
+        offsets.push(url.searchParams.get("offset") ?? "0");
+        const start = Number(url.searchParams.get("offset") ?? 0);
+        return HttpResponse.json({
+          items: Array.from({ length: 20 }, (_, index) => ({
+            ...row,
+            id: `n${start + index}`,
+            title: `Notice ${start + index}`,
+          })),
+          total: 40,
+          unread: 0,
+        });
+      }),
+    );
+
+    renderWithProviders(<NotificationsPage />);
+    expect(await screen.findByText("Notice 0")).toBeInTheDocument();
+    expect(screen.getByText("Showing 1–20 of 40")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(offsets).toContain("20"));
+  });
 });

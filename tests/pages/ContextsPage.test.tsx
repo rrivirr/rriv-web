@@ -63,4 +63,36 @@ describe("ContextsPage", () => {
 
     await waitFor(() => expect(posted).toEqual({ name: "spring-2026" }));
   });
+
+  it("paginates contexts", async () => {
+    const user = userEvent.setup();
+    const offsets: string[] = [];
+    server.use(
+      http.get(contextsUrl, ({ request }) => {
+        const url = new URL(request.url);
+        offsets.push(url.searchParams.get("offset") ?? "0");
+        const start = Number(url.searchParams.get("offset") ?? 0);
+        return HttpResponse.json(
+          Array.from({ length: 24 }, (_, index) => ({
+            id: `c${start + index}`,
+            name: `context-${start + index}`,
+            startedAt: new Date().toISOString(),
+            endedAt: null,
+            Account: { id: "me", email: "me@rriv.org" },
+          })),
+        );
+      }),
+    );
+
+    renderWithProviders(<ContextsPage />, { auth });
+    expect(await screen.findByText("context-0")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(offsets).toContain("24"));
+
+    await user.click(screen.getByRole("button", { name: "Previous" }));
+    await waitFor(() =>
+      expect(screen.getByText("context-0")).toBeInTheDocument(),
+    );
+  });
 });

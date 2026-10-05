@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
 import {
   IconActivity,
@@ -26,10 +26,13 @@ import {
 } from "@/components/DeviceControls";
 import { EmptyState } from "@/components/EmptyState";
 import { JsonBlock } from "@/components/JsonBlock";
+import { Pager } from "@/components/Pager";
 import { QueryError } from "@/components/QueryError";
 import { SectionCard } from "@/components/SectionCard";
 import { Skeleton } from "@/components/Skeleton";
 import { formatDate, formatRelative } from "@/lib/format";
+
+const PAGE_SIZE = 10;
 
 /** Recharts is heavy; load the telemetry panel only when the device page needs it. */
 const DeviceTelemetry = lazy(() =>
@@ -41,22 +44,39 @@ const DeviceTelemetry = lazy(() =>
 export function DeviceDetailPage() {
   const { deviceId } = useParams<{ deviceId: string }>();
   const [showConfig, setShowConfig] = useState(false);
+  const [historyPage, setHistoryPage] = useState(0);
+  const [firmwarePage, setFirmwarePage] = useState(0);
+  const [logsPage, setLogsPage] = useState(0);
 
   const deviceQuery = useDevice(deviceId);
   const device = deviceQuery.data;
   const placement = device?.DeviceContext?.[0];
   const contextId = placement?.Context.id;
 
+  // Reset pagination when navigating between devices.
+  useEffect(() => {
+    setHistoryPage(0);
+    setFirmwarePage(0);
+    setLogsPage(0);
+  }, [deviceId]);
+
   const activeConfig = useActiveConfig(
     device?.id,
     contextId,
     showConfig && Boolean(device?.id) && Boolean(contextId),
   );
-  const history = useConfigHistory(device?.serialNumber);
+  const history = useConfigHistory(device?.serialNumber, {
+    limit: PAGE_SIZE,
+    offset: historyPage,
+  });
   const firmware = useFirmwareHistory(
     device ? { deviceId: device.id } : {},
+    { limit: PAGE_SIZE, offset: firmwarePage },
   );
-  const logs = useDeviceLogs(device?.serialNumber);
+  const logs = useDeviceLogs(device?.serialNumber, {
+    limit: PAGE_SIZE,
+    offset: logsPage,
+  });
 
   const timeline = useMemo<ConfigHistoryItem[]>(() => {
     const data = history.data;
@@ -209,7 +229,19 @@ export function DeviceDetailPage() {
             <Skeleton className="h-10 rounded-xl" />
           </div>
         ) : (
-          <ConfigHistoryList items={timeline} />
+          <>
+            <ConfigHistoryList items={timeline} />
+            <Pager
+              offset={historyPage}
+              pageSize={PAGE_SIZE}
+              count={timeline.length}
+              isFetching={history.isFetching}
+              onPrev={() =>
+                setHistoryPage((page) => Math.max(0, page - PAGE_SIZE))}
+              onNext={() => setHistoryPage((page) => page + PAGE_SIZE)}
+              noun="change"
+            />
+          </>
         )}
       </SectionCard>
 
@@ -248,6 +280,20 @@ export function DeviceDetailPage() {
             ))}
           </ul>
         )}
+
+        {!firmware.isError && !firmware.isPending &&
+        (firmware.data ?? []).length > 0 ? (
+          <Pager
+            offset={firmwarePage}
+            pageSize={PAGE_SIZE}
+            count={(firmware.data ?? []).length}
+            isFetching={firmware.isFetching}
+            onPrev={() =>
+              setFirmwarePage((page) => Math.max(0, page - PAGE_SIZE))}
+            onNext={() => setFirmwarePage((page) => page + PAGE_SIZE)}
+            noun="version"
+          />
+        ) : null}
       </SectionCard>
 
       {/* ---------------------------------------------------------- Logs */}
@@ -283,6 +329,18 @@ export function DeviceDetailPage() {
             ))}
           </ul>
         )}
+
+        {!logs.isError && !logs.isPending && (logs.data ?? []).length > 0 ? (
+          <Pager
+            offset={logsPage}
+            pageSize={PAGE_SIZE}
+            count={(logs.data ?? []).length}
+            isFetching={logs.isFetching}
+            onPrev={() => setLogsPage((page) => Math.max(0, page - PAGE_SIZE))}
+            onNext={() => setLogsPage((page) => page + PAGE_SIZE)}
+            noun="log"
+          />
+        ) : null}
       </SectionCard>
 
       {/* -------------------------------------------------------- Actions */}
@@ -316,11 +374,7 @@ export function DeviceDetailPage() {
           <Skeleton className="h-80 rounded-xl" />
         ) : device ? (
           <Suspense fallback={<Skeleton className="h-80 rounded-xl" />}>
-            <DeviceTelemetry
-              device={device}
-              history={timeline}
-              firmware={firmware.data ?? []}
-            />
+            <DeviceTelemetry device={device} />
           </Suspense>
         ) : null}
       </SectionCard>

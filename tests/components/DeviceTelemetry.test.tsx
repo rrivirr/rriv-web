@@ -1,7 +1,7 @@
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { DeviceTelemetry } from "@/components/DeviceTelemetry";
 import type { ConfigHistoryItem, Device, FirmwareHistoryItem } from "@/api/types";
 import { renderWithProviders } from "../helpers/render";
@@ -16,6 +16,8 @@ const device: Device = {
 };
 
 const readingsUrl = "http://data.test/readings/:eui";
+const configHistoryUrl = "http://api.test/configSnapshot/history";
+const firmwareHistoryUrl = "http://api.test/device/firmware/history";
 
 const history: ConfigHistoryItem[] = [
   {
@@ -38,9 +40,20 @@ const firmware: FirmwareHistoryItem[] = [
 ];
 
 describe("DeviceTelemetry", () => {
+  // The component fetches its own range-scoped markers (and as-at state), so
+  // every render needs the history endpoints stubbed.
+  beforeEach(() => {
+    server.use(
+      http.get(configHistoryUrl, () =>
+        HttpResponse.json({ dataloggerConfigs: [], sensorConfigs: history }),
+      ),
+      http.get(firmwareHistoryUrl, () => HttpResponse.json(firmware)),
+    );
+  });
+
   it("prompts for an EUI when none is registered", () => {
     renderWithProviders(
-      <DeviceTelemetry device={{ ...device, DeviceEuis: [] }} history={[]} firmware={[]} />,
+      <DeviceTelemetry device={{ ...device, DeviceEuis: [] }} />,
     );
     expect(screen.getByText("No EUI registered")).toBeInTheDocument();
   });
@@ -55,16 +68,14 @@ describe("DeviceTelemetry", () => {
       ),
     );
 
-    renderWithProviders(
-      <DeviceTelemetry device={device} history={history} firmware={firmware} />,
-    );
+    renderWithProviders(<DeviceTelemetry device={device} />);
 
     expect(await screen.findByRole("button", { name: "temperature" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "ph" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "1h" })).toBeInTheDocument();
 
-    // Marker list from history + firmware.
-    expect(screen.getByText("ph-sensor")).toBeInTheDocument();
+    // Marker list from the range-scoped history + firmware queries.
+    expect(await screen.findByText("ph-sensor")).toBeInTheDocument();
     expect(screen.getByText("firmware v1.2.3")).toBeInTheDocument();
   });
 
@@ -76,43 +87,71 @@ describe("DeviceTelemetry", () => {
       ),
     );
 
-    renderWithProviders(
-      <DeviceTelemetry device={device} history={[]} firmware={[]} />,
-    );
+    renderWithProviders(<DeviceTelemetry device={device} />);
 
     const toggle = await screen.findByRole("button", { name: "temperature" });
     await user.click(toggle);
     expect(toggle).toHaveClass("line-through");
   });
 
-  it("opens the as-at config when a marker is clicked", async () => {
+  it("shows the config and firmware in effect when a marker is clicked", async () => {
     const user = userEvent.setup();
     server.use(
       http.get(readingsUrl, () =>
         HttpResponse.json([{ timestamp: "2026-01-01T00:30:00Z", temperature: 4 }]),
       ),
+      http.get(configHistoryUrl, () =>
+        HttpResponse.json({
+          dataloggerConfigs: [],
+          sensorConfigs: [
+            {
+              id: "h1",
+              name: "ph-sensor",
+              config: { ph: 7.2 },
+              active: true,
+              createdAt: "2026-01-01T00:00:00Z",
+              deactivatedAt: null,
+              sensorDriverId: "driver-1",
+            },
+          ],
+        }),
+      ),
+      http.get(firmwareHistoryUrl, () =>
+        HttpResponse.json([
+          {
+            version: "1.2.3",
+            installedAt: "2026-01-02T00:00:00Z",
+            createdAt: "2026-01-02T00:00:00Z",
+            contextName: "ctx",
+          },
+        ]),
+      ),
     );
 
-    renderWithProviders(
-      <DeviceTelemetry device={device} history={history} firmware={[]} />,
-    );
+    renderWithProviders(<DeviceTelemetry device={device} />);
 
-    await user.click(await screen.findByText("ph-sensor"));
-    expect(screen.getByText(/Config in effect at/)).toBeInTheDocument();
-    expect(screen.getByText(/"ph": 7.2/)).toBeInTheDocument();
+    await user.click(await screen.findByText("firmware v1.2.3"));
+    expect(await screen.findByText(/In effect at/)).toBeInTheDocument();
+    expect(await screen.findByText(/"ph": 7.2/)).toBeInTheDocument();
+    expect(screen.getByText(/Firmware:/)).toBeInTheDocument();
+    expect(screen.getByText("v1.2.3")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Clear" }));
     await waitFor(() =>
-      expect(screen.queryByText(/Config in effect at/)).not.toBeInTheDocument(),
+      expect(screen.queryByText(/In effect at/)).not.toBeInTheDocument(),
     );
   });
 
   it("shows an empty state when the window has no readings", async () => {
-    server.use(http.get(readingsUrl, () => HttpResponse.json([])));
-
-    renderWithProviders(
-      <DeviceTelemetry device={device} history={[]} firmware={[]} />,
+    server.use(
+      http.get(readingsUrl, () => HttpResponse.json([])),
+      http.get(configHistoryUrl, () =>
+        HttpResponse.json({ dataloggerConfigs: [], sensorConfigs: [] }),
+      ),
+      http.get(firmwareHistoryUrl, () => HttpResponse.json([])),
     );
+
+    renderWithProviders(<DeviceTelemetry device={device} />);
 
     expect(
       await screen.findByText("No readings in this window"),
@@ -127,9 +166,7 @@ describe("DeviceTelemetry", () => {
       http.get(readingsUrl, () => new HttpResponse(null, { status: 500 })),
     );
 
-    renderWithProviders(
-      <DeviceTelemetry device={device} history={[]} firmware={[]} />,
-    );
+    renderWithProviders(<DeviceTelemetry device={device} />);
 
     expect(
       await screen.findByText(/Could not load telemetry/),

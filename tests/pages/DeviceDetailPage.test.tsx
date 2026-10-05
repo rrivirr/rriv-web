@@ -115,4 +115,88 @@ describe("DeviceDetailPage", () => {
     expect(screen.getByText("Sensors (1)")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("ph")).toBeInTheDocument());
   });
+
+  it("paginates config history, firmware and logs", async () => {
+    const user = userEvent.setup();
+    const offsets = { history: [] as string[], firmware: [] as string[], logs: [] as string[] };
+    const pageOf = <T,>(make: (index: number) => T, start: number) =>
+      Array.from({ length: 10 }, (_, index) => make(start + index));
+
+    server.use(
+      http.get(`${api}/device`, () => HttpResponse.json([device])),
+      http.get(`${api}/configSnapshot/history`, ({ request }) => {
+        const start = Number(
+          new URL(request.url).searchParams.get("offset") ?? 0,
+        );
+        offsets.history.push(String(start));
+        return HttpResponse.json({
+          dataloggerConfigs: [],
+          sensorConfigs: pageOf(
+            (index) => ({
+              id: `h${index}`,
+              name: `sensor-${index}`,
+              config: {},
+              active: true,
+              createdAt: "2026-01-01T00:00:00Z",
+              deactivatedAt: null,
+              sensorDriverId: "d1",
+            }),
+            start,
+          ),
+        });
+      }),
+      http.get(`${api}/device/firmware/history`, ({ request }) => {
+        const start = Number(
+          new URL(request.url).searchParams.get("offset") ?? 0,
+        );
+        offsets.firmware.push(String(start));
+        return HttpResponse.json(pageOf(
+          (index) => ({
+            version: `1.0.${index}`,
+            installedAt: "2026-01-02T00:00:00Z",
+            createdAt: "2026-01-02T00:00:00Z",
+            contextName: "well-a",
+          }),
+          start,
+        ));
+      }),
+      http.get(`${api}/device/log`, ({ request }) => {
+        const start = Number(
+          new URL(request.url).searchParams.get("offset") ?? 0,
+        );
+        offsets.logs.push(String(start));
+        return HttpResponse.json(pageOf(
+          (index) => ({
+            log: `log-${index}`,
+            createdAt: "2026-01-03T00:00:00Z",
+            Creator: { firstName: "Ada", lastName: "L" },
+          }),
+          start,
+        ));
+      }),
+      http.get("http://data.test/readings/:eui", () => HttpResponse.json([])),
+    );
+
+    renderWithProviders(page, { route: "/devices/d1" });
+    await screen.findByRole("heading", { name: "logger-a" });
+
+    const nextButtons = await screen.findAllByRole("button", { name: "Next" });
+    for (const button of nextButtons) {
+      await user.click(button);
+    }
+    await waitFor(() => {
+      expect(offsets.history).toContain("10");
+      expect(offsets.firmware).toContain("10");
+      expect(offsets.logs).toContain("10");
+    });
+
+    const prevButtons = screen.getAllByRole("button", { name: "Previous" });
+    for (const button of prevButtons) {
+      await user.click(button);
+    }
+    await waitFor(() =>
+      expect(offsets.history.filter((value) => value === "0").length)
+        .toBeGreaterThan(1),
+    );
+  });
 });

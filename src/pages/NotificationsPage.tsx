@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   useMarkAllNotificationsRead,
   useMarkNotificationRead,
@@ -5,16 +6,21 @@ import {
 } from "@/api/notifications";
 import { Badge } from "@/components/Badge";
 import { EmptyState } from "@/components/EmptyState";
+import { Pager } from "@/components/Pager";
 import { QueryError } from "@/components/QueryError";
 import { Skeleton } from "@/components/Skeleton";
 import { formatRelative } from "@/lib/format";
 
+const PAGE_SIZE = 20;
+
 export function NotificationsPage() {
-  const query = useNotifications({ limit: 50 });
+  const [offset, setOffset] = useState(0);
+  const query = useNotifications({ limit: PAGE_SIZE, offset });
   const markRead = useMarkNotificationRead();
   const markAll = useMarkAllNotificationsRead();
 
   const rows = query.data?.items ?? [];
+  const total = query.data?.total;
 
   return (
     <div className="space-y-6">
@@ -81,6 +87,19 @@ export function NotificationsPage() {
           ))}
         </div>
       )}
+
+      {!query.isError && !query.isPending && rows.length > 0 ? (
+        <Pager
+          offset={offset}
+          pageSize={PAGE_SIZE}
+          count={rows.length}
+          total={total}
+          isFetching={query.isFetching}
+          onPrev={() => setOffset((page) => Math.max(0, page - PAGE_SIZE))}
+          onNext={() => setOffset((page) => page + PAGE_SIZE)}
+          noun="notification"
+        />
+      ) : null}
     </div>
   );
 }

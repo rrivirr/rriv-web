@@ -19,7 +19,7 @@ interface NotificationList {
 }
 
 export function useNotifications(
-  params: { unreadOnly?: boolean; limit?: number } = {},
+  params: { unreadOnly?: boolean; limit?: number; offset?: number } = {},
 ) {
   const api = useApiClient();
   return useQuery({
@@ -28,7 +28,7 @@ export function useNotifications(
       api.get<NotificationList>(
         `/notification?unread=${params.unreadOnly ? "true" : "false"}&limit=${
           params.limit ?? 20
-        }`,
+        }&offset=${params.offset ?? 0}`,
         { signal },
       ),
   });

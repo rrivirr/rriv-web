@@ -6,15 +6,23 @@ import { useDevices } from "@/api/devices";
 import { useBindDevice } from "@/api/mutations";
 import type { Device } from "@/api/types";
 import { EmptyState } from "@/components/EmptyState";
+import { Pager } from "@/components/Pager";
 import { QueryError } from "@/components/QueryError";
 import { Skeleton } from "@/components/Skeleton";
 import { Spinner } from "@/components/Spinner";
 
+const PAGE_SIZE = 24;
+
 export function DevicesPage() {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
+  const [offset, setOffset] = useState(0);
 
-  const query = useDevices({ search: search || undefined });
+  const query = useDevices({
+    search: search || undefined,
+    limit: PAGE_SIZE,
+    offset,
+  });
   const devices = query.data ?? [];
   const bind = useBindDevice();
   const [binding, setBinding] = useState(false);
@@ -23,6 +31,7 @@ export function DevicesPage() {
   function onSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSearch(searchInput.trim());
+    setOffset(0);
   }
 
   function onBind(event: FormEvent<HTMLFormElement>) {
@@ -135,6 +144,18 @@ export function DevicesPage() {
           ))}
         </ul>
       )}
+
+      {!query.isError && !query.isPending ? (
+        <Pager
+          offset={offset}
+          pageSize={PAGE_SIZE}
+          count={devices.length}
+          isFetching={query.isFetching}
+          onPrev={() => setOffset((page) => Math.max(0, page - PAGE_SIZE))}
+          onNext={() => setOffset((page) => page + PAGE_SIZE)}
+          noun="device"
+        />
+      ) : null}
     </div>
   );
 }

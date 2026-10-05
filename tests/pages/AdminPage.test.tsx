@@ -188,4 +188,32 @@ describe("AdminPage", () => {
       await screen.findByText("Could not load authorization syncs: nope"),
     ).toBeInTheDocument();
   });
+
+  it("paginates the sync table", async () => {
+    const user = userEvent.setup();
+    const offsets: string[] = [];
+    server.use(
+      me(true),
+      http.get(`${api}/admin/auth-sync`, ({ request }) => {
+        const url = new URL(request.url);
+        offsets.push(url.searchParams.get("offset") ?? "0");
+        const start = Number(url.searchParams.get("offset") ?? 0);
+        return HttpResponse.json({
+          items: Array.from({ length: 25 }, (_, index) => ({
+            ...row,
+            id: `r${start + index}`,
+          })),
+          total: 50,
+        });
+      }),
+      http.get(`${api}/admin/metrics`, () => HttpResponse.json(metrics)),
+      http.get(`${api}/admin/admins`, () => HttpResponse.json([])),
+    );
+
+    renderWithProviders(<AdminPage />);
+    expect(await screen.findByText("Showing 1–25 of 50")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(offsets).toContain("25"));
+  });
 });
