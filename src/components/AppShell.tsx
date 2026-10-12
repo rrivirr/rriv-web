@@ -21,6 +21,7 @@ export function AppShell() {
   const navItems = [
     { to: "/contexts", label: "Contexts" },
     { to: "/devices", label: "Devices" },
+    { to: "/connect", label: "Connect" },
     { to: "/library", label: "Library" },
     ...(me.data?.isAdmin ? [{ to: "/admin", label: "Admin" }] : []),
   ];

@@ -14,7 +14,7 @@ import { Pager } from "@/components/Pager";
 import { QueryError } from "@/components/QueryError";
 import { Skeleton } from "@/components/Skeleton";
 import { Spinner } from "@/components/Spinner";
-import { AdminsCard } from "@/components/AdminsCard";
+import { RolesCard } from "@/components/RolesCard";
 import { formatRelative } from "@/lib/format";
 
 const PAGE_SIZE = 25;
@@ -256,7 +256,7 @@ export function AdminPage() {
         />
       ) : null}
 
-      <AdminsCard />
+      <RolesCard />
     </div>
   );
 }

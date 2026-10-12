@@ -1,42 +1,47 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApiClient } from "./client";
 
-/** An account holding `admin` on `system:rriv`. */
-export interface AdminAccount {
+/** Roles granted on `system:rriv`. Admins are implicitly provisioners. */
+export const SYSTEM_ROLES = ["admin", "provisioner"] as const;
+export type SystemRole = (typeof SYSTEM_ROLES)[number];
+
+/** An account holding one or more system roles (`GET /admin/roles`). */
+export interface RoleHolder {
   id: string;
   email: string;
   firstName: string;
   lastName: string;
+  roles: SystemRole[];
 }
 
-export const adminKeys = {
-  list: ["admins"] as const,
+export const roleKeys = {
+  list: ["admin", "roles"] as const,
 };
 
-export function useAdmins() {
+export function useRoleHolders() {
   const api = useApiClient();
   return useQuery({
-    queryKey: adminKeys.list,
-    queryFn: ({ signal }) =>
-      api.get<AdminAccount[]>("/admin/admins", { signal }),
+    queryKey: roleKeys.list,
+    queryFn: ({ signal }) => api.get<RoleHolder[]>("/admin/roles", { signal }),
   });
 }
 
-export function useGrantAdmin() {
+export function useGrantRole() {
   const api = useApiClient();
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (email: string) =>
-      api.post<AdminAccount>("/admin/admins", { email }),
-    onSuccess: () => client.invalidateQueries({ queryKey: adminKeys.list }),
+    mutationFn: (body: { email: string; role: SystemRole }) =>
+      api.post<RoleHolder>("/admin/roles", body),
+    onSuccess: () => client.invalidateQueries({ queryKey: roleKeys.list }),
   });
 }
 
-export function useRevokeAdmin() {
+export function useRevokeRole() {
   const api = useApiClient();
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api.delete<void>(`/admin/admins/${id}`),
-    onSuccess: () => client.invalidateQueries({ queryKey: adminKeys.list }),
+    mutationFn: ({ id, role }: { id: string; role: SystemRole }) =>
+      api.delete<void>(`/admin/roles/${role}/${id}`),
+    onSuccess: () => client.invalidateQueries({ queryKey: roleKeys.list }),
   });
 }

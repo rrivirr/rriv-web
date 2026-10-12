@@ -143,6 +143,28 @@ describe("AuthProvider", () => {
     );
   });
 
+  it("revokes Web Serial board permissions before signing out", async () => {
+    mocks.userManager.getUser.mockResolvedValue(null);
+    mocks.userManager.signoutRedirect.mockResolvedValue(undefined);
+    const forget = vi.fn(async () => {});
+    Object.defineProperty(window.navigator, "serial", {
+      configurable: true,
+      value: { getPorts: async () => [{ forget }] },
+    });
+    const user1 = userEvent.setup();
+    try {
+      renderProvider();
+      await user1.click(await screen.findByRole("button", { name: "signout" }));
+      await waitFor(() => expect(mocks.userManager.signoutRedirect).toHaveBeenCalled());
+      expect(forget).toHaveBeenCalledOnce();
+      expect(forget.mock.invocationCallOrder[0]).toBeLessThan(
+        mocks.userManager.signoutRedirect.mock.invocationCallOrder.at(-1)!,
+      );
+    } finally {
+      Reflect.deleteProperty(window.navigator, "serial");
+    }
+  });
+
   it("signs out and surfaces a failure", async () => {
     mocks.userManager.getUser.mockResolvedValue(null);
     const user1 = userEvent.setup();

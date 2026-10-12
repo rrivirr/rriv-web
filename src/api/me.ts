@@ -1,13 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
 import { useApiClient } from "./client";
 
-/** `GET /account/me` — the signed-in account plus its admin flag. */
+/** `GET /account/me` — the signed-in account plus its role flags. */
 export interface Me {
   id: string;
   email: string;
   firstName: string;
   lastName: string;
   isAdmin: boolean;
+  /** Can provision new boards (admins are implied). */
+  isProvisioner: boolean;
 }
 
 export function useMe() {

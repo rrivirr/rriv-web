@@ -7,6 +7,7 @@ import {
 } from "react";
 import type { ReactNode } from "react";
 import type { User } from "oidc-client-ts";
+import { forgetGrantedPorts } from "@/serial/webSerialApi";
 import { userManager } from "./userManager";
 
 export type AuthStatus = "loading" | "authenticated" | "unauthenticated";
@@ -89,6 +90,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signout = useCallback(async () => {
     setError(null);
     try {
+      // Board permissions outlive the session; don't hand them to the next user.
+      await forgetGrantedPorts();
       await userManager.signoutRedirect();
     } catch (cause) {
       setError(describe(cause, "Unable to sign out."));

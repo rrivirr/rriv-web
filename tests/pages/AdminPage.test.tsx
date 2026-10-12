@@ -68,7 +68,7 @@ function baseHandlers() {
       HttpResponse.json({ items: [row], total: 1 }),
     ),
     http.get(`${api}/admin/metrics`, () => HttpResponse.json(metrics)),
-    http.get(`${api}/admin/admins`, () => HttpResponse.json([])),
+    http.get(`${api}/admin/roles`, () => HttpResponse.json([])),
   );
 }
 
@@ -166,7 +166,7 @@ describe("AdminPage", () => {
         HttpResponse.json({ items: [], total: 0 }),
       ),
       http.get(`${api}/admin/metrics`, () => HttpResponse.json(metrics)),
-      http.get(`${api}/admin/admins`, () => HttpResponse.json([])),
+      http.get(`${api}/admin/roles`, () => HttpResponse.json([])),
     );
 
     renderWithProviders(<AdminPage />);
@@ -180,7 +180,7 @@ describe("AdminPage", () => {
         HttpResponse.json({ message: "nope" }, { status: 500 }),
       ),
       http.get(`${api}/admin/metrics`, () => HttpResponse.json(metrics)),
-      http.get(`${api}/admin/admins`, () => HttpResponse.json([])),
+      http.get(`${api}/admin/roles`, () => HttpResponse.json([])),
     );
 
     renderWithProviders(<AdminPage />);
@@ -207,7 +207,7 @@ describe("AdminPage", () => {
         });
       }),
       http.get(`${api}/admin/metrics`, () => HttpResponse.json(metrics)),
-      http.get(`${api}/admin/admins`, () => HttpResponse.json([])),
+      http.get(`${api}/admin/roles`, () => HttpResponse.json([])),
     );
 
     renderWithProviders(<AdminPage />);

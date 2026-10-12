@@ -7,6 +7,7 @@ import { PublicShell } from "@/components/PublicShell";
 import { AdminPage } from "@/pages/AdminPage";
 import { ContextDetailPage } from "@/pages/ContextDetailPage";
 import { ContextsPage } from "@/pages/ContextsPage";
+import { DeviceConnectionPage } from "@/pages/DeviceConnectionPage";
 import { DeviceDetailPage } from "@/pages/DeviceDetailPage";
 import { DevicesPage } from "@/pages/DevicesPage";
 import { LandingPage } from "@/pages/LandingPage";
@@ -39,6 +40,7 @@ export function App() {
             <Route path="/contexts/:contextId" element={<ContextDetailPage />} />
             <Route path="/devices" element={<DevicesPage />} />
             <Route path="/devices/:deviceId" element={<DeviceDetailPage />} />
+            <Route path="/connect" element={<DeviceConnectionPage />} />
             <Route path="/library" element={<LibraryPage />} />
             <Route path="/library/:kind/:id" element={<LibraryConfigPage />} />
             <Route path="/admin" element={<AdminPage />} />

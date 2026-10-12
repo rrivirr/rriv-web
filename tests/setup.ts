@@ -1,7 +1,12 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll } from "vitest";
 import { server } from "./helpers/server";
+
+// Match src/main.tsx: StrictMode mounts, unmounts and remounts every
+// component in development. (Wrapping in <StrictMode> in a test doesn't
+// double-run effects; this option does.)
+configure({ reactStrictMode: true });
 
 // jsdom does not implement matchMedia; the theme provider depends on it.
 if (typeof window !== "undefined" && !window.matchMedia) {

@@ -2,6 +2,7 @@
   "name": "rriv-web",
   "private": true,
   "version": "1.0.5",
+  "license": "GPL-3.0-only",
   "type": "module",
   "scripts": {
     "dev": "vite",
