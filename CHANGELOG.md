@@ -1,3 +1,10 @@
+## [1.0.6](https://github.com/rrivirr/rriv-web/compare/v1.0.5...v1.0.6) (2026-10-05)
+
+
+### Bug Fixes
+
+* pagination fixes ([d610ee2](https://github.com/rrivirr/rriv-web/commit/d610ee26cfc0d5828e968c4b343e6898b916122f))
+
 ## [1.0.5](https://github.com/rrivirr/rriv-web/compare/v1.0.4...v1.0.5) (2026-10-01)
 
 
