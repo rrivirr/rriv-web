@@ -34,7 +34,7 @@ import { formatDate, formatRelative } from "@/lib/format";
 
 const PAGE_SIZE = 10;
 
-/** Recharts is heavy; load the telemetry panel only when the device page needs it. */
+/** Load the telemetry panel (and its chart library) only when the device page needs it. */
 const DeviceTelemetry = lazy(() =>
   import("@/components/DeviceTelemetry").then((module) => ({
     default: module.DeviceTelemetry,

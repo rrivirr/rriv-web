@@ -11,7 +11,6 @@ export default mergeConfig(
       include: ["tests/**/*.test.{ts,tsx}"],
       env: {
         VITE_RRIV_API_BASE_URL: "http://api.test",
-        VITE_DATA_API_URL: "http://data.test",
         VITE_KEYCLOAK_URL: "http://keycloak.test",
         VITE_KEYCLOAK_REALM: "test",
         VITE_KEYCLOAK_CLIENT_ID: "rriv-web",

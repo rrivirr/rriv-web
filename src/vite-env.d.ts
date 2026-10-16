@@ -9,8 +9,6 @@ interface ImportMetaEnv {
   readonly VITE_KEYCLOAK_URL: string;
   readonly VITE_KEYCLOAK_REALM: string;
   readonly VITE_KEYCLOAK_CLIENT_ID: string;
-  /** Telemetry API (data-api). Defaults to http://localhost:3010. */
-  readonly VITE_DATA_API_URL?: string;
 }
 
 interface ImportMeta {
@@ -25,7 +23,6 @@ interface ImportMeta {
 interface Window {
   __RRIV_CONFIG__?: {
     apiBaseUrl?: string;
-    dataApiBaseUrl?: string;
     keycloakUrl?: string;
     keycloakRealm?: string;
     keycloakClientId?: string;

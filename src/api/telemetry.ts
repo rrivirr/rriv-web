@@ -1,9 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import { ApiError } from "./client";
-import { config } from "@/config";
+import { useApiClient } from "./client";
 
 /**
- * A telemetry row from `GET {data-api}/readings/:eui`.
  *
  * `values` keys are NOT uniform across boards — a row is a flat object of
  * whatever channels the device published, plus an ISO `timestamp` injected by
@@ -24,68 +22,37 @@ export interface TelemetryPoint {
   [key: string]: number | null;
 }
 
-const MAX_LIMIT = 100_000; // data-api caps at 100000
-
-async function fetchReadings(
-  eui: string,
-  range: TelemetryRange,
-  signal: AbortSignal,
-): Promise<Reading[]> {
-  const params = new URLSearchParams({
-    rangeStart: range.start.toISOString(),
-    format: "json",
-    limit: String(MAX_LIMIT),
-  });
-  if (range.end) params.set("rangeEnd", range.end.toISOString());
-
-  const response = await fetch(
-    `${config.dataApiBaseUrl}/readings/${encodeURIComponent(eui)}?${params.toString()}`,
-    { signal, headers: { Accept: "application/json" } },
-  );
-
-  if (!response.ok) {
-    throw new ApiError(
-      response.status,
-      `Telemetry API responded with ${response.status}`,
-    );
-  }
-
-  const payload: unknown = await response.json();
-  return Array.isArray(payload) ? (payload as Reading[]) : [];
-}
-
 /**
- * data-api matches the EUI exactly, but the stored casing varies (device_eui vs
- * the ingest), so try the given value then its lower/upper variants.
+ * A device's readings in a time range. Access is enforced by rriv-api (own
+ * ownership periods, time in a shared context, admins), so periods the user
+ * may not see are simply absent. No `limit` is sent: rriv-api's default
+ * returns the whole range, up to its cap.
  */
-async function fetchWithFallback(
-  eui: string,
-  range: TelemetryRange,
-  signal: AbortSignal,
-): Promise<{ eui: string; readings: Reading[] }> {
-  const variants = Array.from(
-    new Set([eui, eui.toLowerCase(), eui.toUpperCase()]),
-  );
-  for (const variant of variants) {
-    const readings = await fetchReadings(variant, range, signal);
-    if (readings.length > 0) return { eui: variant, readings };
-  }
-  return { eui, readings: [] };
-}
-
 export function useReadings(
-  eui: string | undefined,
+  deviceId: string | undefined,
   range: TelemetryRange | null,
+  options: { enabled?: boolean } = {},
 ) {
+  const api = useApiClient();
   return useQuery({
     queryKey: [
       "telemetry",
-      eui ?? "",
+      deviceId ?? "",
       range?.start.toISOString() ?? null,
       range?.end?.toISOString() ?? null,
     ],
-    queryFn: ({ signal }) => fetchWithFallback(eui!, range!, signal),
-    enabled: Boolean(eui && range),
+    queryFn: ({ signal }) => {
+      const params = new URLSearchParams({
+        rangeStart: range!.start.toISOString(),
+        format: "json",
+      });
+      if (range!.end) params.set("rangeEnd", range!.end.toISOString());
+      return api.get<Reading[]>(
+        `/device/${encodeURIComponent(deviceId!)}/telemetry?${params.toString()}`,
+        { signal },
+      );
+    },
+    enabled: Boolean(deviceId && range) && (options.enabled ?? true),
   });
 }
 
@@ -106,7 +73,9 @@ export function numericSeriesKeys(readings: Reading[]): string[] {
       }
     }
   }
-  return [...keys].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  return [...keys].sort((a, b) =>
+    a.localeCompare(b, undefined, { numeric: true }),
+  );
 }
 
 /** Normalise rows into chart points, sorted ascending by time, null for gaps. */

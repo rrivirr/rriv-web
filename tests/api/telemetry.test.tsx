@@ -9,7 +9,7 @@ import {
 import { hookWrapper } from "../helpers/render";
 import { server } from "../helpers/server";
 
-const readingsUrl = "http://data.test/readings";
+const telemetryUrl = "http://api.test/device/:id/telemetry";
 
 describe("numericSeriesKeys", () => {
   it("collects numeric and numeric-string channels, sorted naturally", () => {
@@ -54,47 +54,57 @@ describe("toChartData", () => {
 describe("useReadings", () => {
   const range = { start: new Date("2026-01-01T00:00:00Z") };
 
-  it("is disabled without an EUI or range", () => {
-    const { result } = renderHook(() => useReadings(undefined, range), {
-      wrapper: hookWrapper(),
-    });
-    expect(result.current.fetchStatus).toBe("idle");
+  it("is disabled without a device, a range, or when told to wait", () => {
+    for (const [deviceId, r, enabled] of [
+      [undefined, range, true],
+      ["d1", null, true],
+      ["d1", range, false],
+    ] as const) {
+      const { result } = renderHook(
+        () => useReadings(deviceId, r, { enabled }),
+        { wrapper: hookWrapper() },
+      );
+      expect(result.current.fetchStatus).toBe("idle");
+    }
   });
 
-  it("falls back through EUI casings until it finds readings", async () => {
+  it("reads from rriv-api by device, with the user's token", async () => {
+    let request: Request | undefined;
     server.use(
-      http.get(`${readingsUrl}/:eui`, ({ params }) => {
-        const eui = String(params.eui);
-        // Only the lower-cased variant has data.
-        return eui === eui.toLowerCase()
-          ? HttpResponse.json([
-              { timestamp: "2026-01-01T00:30:00Z", temperature: 4 },
-            ])
-          : HttpResponse.json([]);
+      http.get(telemetryUrl, ({ request: incoming, params }) => {
+        request = incoming;
+        expect(params.id).toBe("d1");
+        return HttpResponse.json([
+          { timestamp: "2026-01-01T00:30:00Z", temperature: 4 },
+        ]);
       }),
     );
 
-    const { result } = renderHook(() => useReadings("ABC", range), {
+    const { result } = renderHook(() => useReadings("d1", range), {
       wrapper: hookWrapper(),
     });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data?.eui).toBe("abc");
-    expect(result.current.data?.readings).toHaveLength(1);
+    expect(result.current.data).toHaveLength(1);
+    expect(request?.headers.get("authorization")).toBe("Bearer test-token");
+    const search = new URL(request!.url).searchParams;
+    expect(search.get("rangeStart")).toBe("2026-01-01T00:00:00.000Z");
+    expect(search.get("format")).toBe("json");
+    expect(search.has("limit")).toBe(false);
   });
 
-  it("adds rangeEnd and surfaces data-api errors", async () => {
+  it("adds rangeEnd and surfaces API errors", async () => {
     let search = "";
     server.use(
-      http.get(`${readingsUrl}/abc`, ({ request }) => {
+      http.get(telemetryUrl, ({ request }) => {
         search = new URL(request.url).search;
-        return new HttpResponse(null, { status: 503 });
+        return HttpResponse.json({ message: "unavailable" }, { status: 503 });
       }),
     );
 
     const { result } = renderHook(
       () =>
-        useReadings("abc", {
+        useReadings("d1", {
           start: range.start,
           end: new Date("2026-01-01T06:00:00Z"),
         }),
@@ -103,6 +113,5 @@ describe("useReadings", () => {
 
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(search).toContain("rangeEnd=");
-    expect(search).toContain("format=json");
   });
 });

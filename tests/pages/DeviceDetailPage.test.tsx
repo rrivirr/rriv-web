@@ -57,7 +57,7 @@ function useDetailHandlers(devices: Device[] | "error" = [device]) {
         },
       ]),
     ),
-    http.get("http://data.test/readings/:eui", () => HttpResponse.json([])),
+    http.get("http://api.test/device/:id/telemetry", () => HttpResponse.json([])),
   );
 }
 
@@ -174,7 +174,7 @@ describe("DeviceDetailPage", () => {
           start,
         ));
       }),
-      http.get("http://data.test/readings/:eui", () => HttpResponse.json([])),
+      http.get("http://api.test/device/:id/telemetry", () => HttpResponse.json([])),
     );
 
     renderWithProviders(page, { route: "/devices/d1" });

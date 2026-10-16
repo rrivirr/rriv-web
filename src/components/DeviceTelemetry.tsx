@@ -1,16 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
-  CartesianGrid,
-  Legend,
-  Line,
-  LineChart,
-  ReferenceLine,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
-import { IconActivity, IconAlert, IconRefresh } from "@/assets/Icons";
+  IconActivity,
+  IconAlert,
+  IconClose,
+  IconExpand,
+  IconRefresh,
+} from "@/assets/Icons";
 import { numericSeriesKeys, toChartData, useReadings } from "@/api/telemetry";
 import { useConfigHistory, useFirmwareHistory } from "@/api/configs";
 import type { Device } from "@/api/types";
@@ -19,6 +14,11 @@ import { EmptyState } from "@/components/EmptyState";
 import { JsonBlock } from "@/components/JsonBlock";
 import { QueryError } from "@/components/QueryError";
 import { Skeleton } from "@/components/Skeleton";
+import {
+  MARKER_STYLES,
+  TelemetryChart,
+  seriesColor,
+} from "@/components/TelemetryChart";
 import { formatDate, formatRelative } from "@/lib/format";
 
 const PRESETS = [
@@ -30,39 +30,60 @@ const PRESETS = [
 ] as const;
 type PresetId = (typeof PRESETS)[number]["id"];
 
-const SERIES_COLORS = [
-  "#3fe3d1",
-  "#60a5fa",
-  "#f472b6",
-  "#facc15",
-  "#a78bfa",
-  "#34d399",
-  "#fb923c",
-  "#f87171",
-  "#22d3ee",
-  "#c084fc",
-];
+/** A Date as a `datetime-local` input value (local time, to the minute). */
+function toLocalInput(date: Date): string {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
 
 export function DeviceTelemetry({ device }: { device: Device }) {
   const eui = device.DeviceEuis?.[0]?.eui;
-  const [preset, setPreset] = useState<PresetId>("24h");
+  const [preset, setPreset] = useState<PresetId | "custom">("24h");
+  // The applied custom range, and the inputs being edited before Apply.
+  const [customRange, setCustomRange] = useState<{ start: Date; end: Date } | null>(null);
+  const [draft, setDraft] = useState({ from: "", to: "" });
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [selectedTime, setSelectedTime] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState(false);
 
-  const range = useMemo(() => {
+  useEffect(() => {
+    if (!expanded) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setExpanded(false);
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [expanded]);
+
+  const range = useMemo<{ start: Date; end?: Date }>(() => {
+    if (preset === "custom" && customRange) return customRange;
     const hours = PRESETS.find((item) => item.id === preset)?.hours ?? 24;
     return { start: new Date(Date.now() - hours * 3_600_000) };
-  }, [preset]);
+  }, [preset, customRange]);
 
-  const query = useReadings(eui, range);
-  const rows = useMemo(() => query.data?.readings ?? [], [query.data]);
+  const draftFrom = draft.from ? new Date(draft.from) : null;
+  const draftTo = draft.to ? new Date(draft.to) : null;
+  const draftValid = Boolean(draftFrom && draftTo && draftFrom < draftTo);
+
+  function openCustom() {
+    // Keep showing the current range until new dates are applied.
+    const current = { start: range.start, end: range.end ?? new Date() };
+    setCustomRange(current);
+    setDraft({ from: toLocalInput(current.start), to: toLocalInput(current.end) });
+    setPreset("custom");
+  }
+
+  const query = useReadings(device.id, range, { enabled: Boolean(eui) });
+  const rows = useMemo(() => query.data ?? [], [query.data]);
   const keys = useMemo(() => numericSeriesKeys(rows), [rows]);
   const chartData = useMemo(() => toChartData(rows, keys), [rows, keys]);
-  const matchedEui = query.data?.eui ?? eui;
 
   // Markers are scoped to the visible chart window, not the whole history, so
   // they stay aligned with the chart and aren't clipped by the API's page cap.
-  const markerWindow = { from: range.start.toISOString() };
+  const markerWindow = {
+    from: range.start.toISOString(),
+    to: range.end?.toISOString(),
+  };
   const markersConfigQuery = useConfigHistory(
     device.serialNumber,
     markerWindow,
@@ -135,14 +156,6 @@ export function DeviceTelemetry({ device }: { device: Device }) {
     });
   }
 
-  function handleChartClick(state: unknown) {
-    const label = (state as { activeLabel?: number | string } | null)
-      ?.activeLabel;
-    if (label !== undefined && label !== null && Number.isFinite(Number(label))) {
-      setSelectedTime(Number(label));
-    }
-  }
-
   if (!eui) {
     return (
       <EmptyState
@@ -152,6 +165,47 @@ export function DeviceTelemetry({ device }: { device: Device }) {
       />
     );
   }
+
+  // Shared by the page and the enlarged overlay (same state, same handlers).
+  const seriesToggles = (
+    <div className="flex flex-wrap gap-1.5">
+      {keys.map((key, index) => {
+        const off = hidden.has(key);
+        return (
+          <button
+            key={key}
+            type="button"
+            onClick={() => toggleSeries(key)}
+            className={[
+              "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] transition",
+              off
+                ? "border-border text-fg-subtle line-through"
+                : "border-border bg-surface-2/70 text-fg-muted",
+            ].join(" ")}
+          >
+            <span
+              className="h-2 w-2 rounded-full"
+              style={{
+                backgroundColor: seriesColor(index),
+                opacity: off ? 0.3 : 1,
+              }}
+            />
+            {key}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  const chart = (
+    <TelemetryChart
+      data={chartData}
+      keys={keys}
+      hidden={hidden}
+      markers={markers}
+      onSelectTime={setSelectedTime}
+    />
+  );
 
   return (
     <div className="space-y-5">
@@ -173,6 +227,18 @@ export function DeviceTelemetry({ device }: { device: Device }) {
               {option.label}
             </button>
           ))}
+          <button
+            type="button"
+            onClick={openCustom}
+            className={[
+              "rounded-lg px-3 py-1.5 text-xs transition",
+              preset === "custom"
+                ? "bg-surface-2 text-fg"
+                : "text-fg-muted hover:text-fg",
+            ].join(" ")}
+          >
+            Custom
+          </button>
         </div>
         <button
           type="button"
@@ -185,6 +251,49 @@ export function DeviceTelemetry({ device }: { device: Device }) {
         </button>
       </div>
 
+      {preset === "custom" && (
+        <form
+          className="flex flex-wrap items-end gap-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (draftValid) setCustomRange({ start: draftFrom!, end: draftTo! });
+          }}
+        >
+          <label className="space-y-1 text-xs text-fg-muted">
+            <span>From</span>
+            <input
+              type="datetime-local"
+              className="field py-1.5 text-xs"
+              value={draft.from}
+              max={draft.to || undefined}
+              onChange={(event) => setDraft({ ...draft, from: event.target.value })}
+              aria-invalid={Boolean(draft.from && draft.to) && !draftValid}
+            />
+          </label>
+          <label className="space-y-1 text-xs text-fg-muted">
+            <span>To</span>
+            <input
+              type="datetime-local"
+              className="field py-1.5 text-xs"
+              value={draft.to}
+              min={draft.from || undefined}
+              onChange={(event) => setDraft({ ...draft, to: event.target.value })}
+              aria-invalid={Boolean(draft.from && draft.to) && !draftValid}
+            />
+          </label>
+          <button
+            type="submit"
+            className="btn btn-primary px-3 py-1.5 text-xs"
+            disabled={!draftValid}
+          >
+            Apply
+          </button>
+          {Boolean(draft.from && draft.to) && !draftValid && (
+            <p className="text-xs text-red-500">From must be before To.</p>
+          )}
+        </form>
+      )}
+
       {query.isError ? (
         <QueryError error={query.error} label="telemetry" />
       ) : query.isPending ? (
@@ -193,129 +302,77 @@ export function DeviceTelemetry({ device }: { device: Device }) {
         <EmptyState
           icon={<IconActivity className="h-5 w-5" />}
           title="No readings in this window"
-          description={`No telemetry for ${matchedEui} in the selected range. Try a wider window.`}
+          description={`No telemetry for ${eui} in the selected range. Try a wider window.`}
         />
       ) : (
         <>
           {/* Series toggles */}
-          <div className="flex flex-wrap gap-1.5">
-            {keys.map((key, index) => {
-              const off = hidden.has(key);
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => toggleSeries(key)}
-                  className={[
-                    "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] transition",
-                    off
-                      ? "border-border text-fg-subtle line-through"
-                      : "border-border bg-surface-2/70 text-fg-muted",
-                  ].join(" ")}
-                >
-                  <span
-                    className="h-2 w-2 rounded-full"
-                    style={{
-                      backgroundColor: SERIES_COLORS[index % SERIES_COLORS.length],
-                      opacity: off ? 0.3 : 1,
-                    }}
-                  />
-                  {key}
-                </button>
-              );
-            })}
-          </div>
+          {seriesToggles}
 
           {/* Chart */}
-          <div className="h-80 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart
-                data={chartData}
-                onClick={handleChartClick}
-                margin={{ top: 8, right: 16, bottom: 4, left: 0 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                <XAxis
-                  dataKey="t"
-                  type="number"
-                  domain={["dataMin", "dataMax"]}
-                  scale="time"
-                  tick={{ fontSize: 11 }}
-                  stroke="var(--color-fg-subtle)"
-                  tickFormatter={(value: number) =>
-                    new Date(value).toLocaleString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })
-                  }
-                />
-                <YAxis
-                  tick={{ fontSize: 11 }}
-                  stroke="var(--color-fg-subtle)"
-                  width={48}
-                />
-                <Tooltip
-                  contentStyle={{
-                    background: "var(--color-surface)",
-                    border: "1px solid var(--color-border)",
-                    borderRadius: 12,
-                    fontSize: 12,
-                  }}
-                  labelFormatter={(value) =>
-                    new Date(Number(value)).toLocaleString()
-                  }
-                />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                {keys
-                  .filter((key) => !hidden.has(key))
-                  .map((key) => (
-                    <Line
-                      key={key}
-                      type="monotone"
-                      dataKey={key}
-                      dot={false}
-                      strokeWidth={1.5}
-                      connectNulls={false}
-                      isAnimationActive={false}
-                      stroke={
-                        SERIES_COLORS[keys.indexOf(key) % SERIES_COLORS.length]
-                      }
-                    />
-                  ))}
-                {markers
-                  .filter((marker) => marker.kind === "config")
-                  .map((marker, index) => (
-                    <ReferenceLine
-                      key={`config-${index}`}
-                      x={marker.t}
-                      stroke="#3fe3d1"
-                      strokeDasharray="4 4"
-                    />
-                  ))}
-                {markers
-                  .filter((marker) => marker.kind === "firmware")
-                  .map((marker, index) => (
-                    <ReferenceLine
-                      key={`firmware-${index}`}
-                      x={marker.t}
-                      stroke="#f59e0b"
-                      strokeDasharray="2 4"
-                    />
-                  ))}
-              </LineChart>
-            </ResponsiveContainer>
+          <div className="relative h-80 w-full">
+            {chart}
+            <button
+              type="button"
+              className="btn btn-ghost absolute right-2 top-0 px-2 py-1"
+              onClick={() => setExpanded(true)}
+              aria-label="Enlarge chart"
+              title="Enlarge chart"
+            >
+              <IconExpand className="h-3.5 w-3.5" />
+            </button>
           </div>
+
+          {expanded && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+              onClick={() => setExpanded(false)}
+            >
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-label={`Telemetry · ${device.uniqueName}`}
+                className="surface flex h-[90vh] w-full max-w-6xl flex-col gap-3 p-4"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <h2 className="text-sm font-medium text-fg">
+                    Telemetry · {device.uniqueName}
+                  </h2>
+                  <button
+                    type="button"
+                    className="btn btn-ghost px-2 py-1"
+                    onClick={() => setExpanded(false)}
+                    aria-label="Close enlarged chart"
+                  >
+                    <IconClose className="h-4 w-4" />
+                  </button>
+                </div>
+                {seriesToggles}
+                <div className="min-h-0 flex-1">{chart}</div>
+              </div>
+            </div>
+          )}
 
           <p className="flex flex-wrap items-center gap-4 text-xs text-fg-subtle">
             <span className="inline-flex items-center gap-1.5">
-              <span className="h-0.5 w-4 rounded bg-[#3fe3d1]" /> config change
+              <span
+                className="h-0.5 w-4 rounded"
+                style={{ backgroundColor: MARKER_STYLES.config.color }}
+              />{" "}
+              config change
             </span>
             <span className="inline-flex items-center gap-1.5">
-              <span className="h-0.5 w-4 rounded bg-[#f59e0b]" /> firmware change
+              <span
+                className="h-0.5 w-4 rounded"
+                style={{ backgroundColor: MARKER_STYLES.firmware.color }}
+              />{" "}
+              firmware change
             </span>
-            <span>Click the chart or a marker to see the state in effect.</span>
+            <span>
+              Click the chart or a marker to see the state in effect. Drag to
+              zoom; double-click to reset.
+            </span>
           </p>
 
           {/* As-at state */}

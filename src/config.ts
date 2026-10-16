@@ -26,8 +26,6 @@ const runtime = window.__RRIV_CONFIG__ ?? {};
 const env = {
   VITE_RRIV_API_BASE_URL:
     runtime.apiBaseUrl?.trim() || import.meta.env.VITE_RRIV_API_BASE_URL,
-  VITE_DATA_API_URL:
-    runtime.dataApiBaseUrl?.trim() || import.meta.env.VITE_DATA_API_URL,
   VITE_KEYCLOAK_URL:
     runtime.keycloakUrl?.trim() || import.meta.env.VITE_KEYCLOAK_URL,
   VITE_KEYCLOAK_REALM:
@@ -65,15 +63,8 @@ function asUrl(value: string, key: string): string {
 const keycloakUrl = asUrl(env.VITE_KEYCLOAK_URL!, "VITE_KEYCLOAK_URL");
 const keycloakRealm = env.VITE_KEYCLOAK_REALM!.trim();
 
-/** Telemetry API (data-api); optional with a local default. */
-const dataApiUrl = asUrl(
-  env.VITE_DATA_API_URL?.trim() || "http://localhost:3010",
-  "VITE_DATA_API_URL",
-);
-
 export const config = {
   apiBaseUrl: asUrl(env.VITE_RRIV_API_BASE_URL!, "VITE_RRIV_API_BASE_URL"),
-  dataApiBaseUrl: dataApiUrl,
   keycloak: {
     url: keycloakUrl,
     realm: keycloakRealm,

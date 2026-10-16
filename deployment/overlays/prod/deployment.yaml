@@ -10,8 +10,6 @@ spec:
           env:
             - name: RRIV_API_BASE_URL
               value: https://api.rriv.org/rriv
-            - name: RRIV_DATA_API_URL
-              value: https://api.rriv.org/data
             - name: RRIV_KEYCLOAK_URL
               value: https://auth.rriv.org
             - name: RRIV_KEYCLOAK_REALM

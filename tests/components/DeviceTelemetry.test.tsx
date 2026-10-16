@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -15,7 +15,7 @@ const device: Device = {
   DeviceEuis: [{ eui: "eui-1" }],
 };
 
-const readingsUrl = "http://data.test/readings/:eui";
+const readingsUrl = "http://api.test/device/:id/telemetry";
 const configHistoryUrl = "http://api.test/configSnapshot/history";
 const firmwareHistoryUrl = "http://api.test/device/firmware/history";
 
@@ -77,6 +77,88 @@ describe("DeviceTelemetry", () => {
     // Marker list from the range-scoped history + firmware queries.
     expect(await screen.findByText("ph-sensor")).toBeInTheDocument();
     expect(screen.getByText("firmware v1.2.3")).toBeInTheDocument();
+  });
+
+  it("enlarges the chart into an overlay and closes it", async () => {
+    server.use(
+      http.get(readingsUrl, () =>
+        HttpResponse.json([
+          { timestamp: "2026-01-01T00:30:00Z", temperature: 4 },
+          { timestamp: "2026-01-01T01:30:00Z", temperature: 5 },
+        ]),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<DeviceTelemetry device={device} />);
+
+    await user.click(await screen.findByRole("button", { name: "Enlarge chart" }));
+    const dialog = screen.getByRole("dialog", { name: "Telemetry · logger-a" });
+    // The overlay has its own series toggles, sharing the page's state.
+    expect(
+      screen.getAllByRole("button", { name: "temperature" }),
+    ).toHaveLength(2);
+    expect(dialog).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Close enlarged chart" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    // Escape closes it too.
+    await user.click(screen.getByRole("button", { name: "Enlarge chart" }));
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("reads a custom date range once applied", async () => {
+    const searches: URLSearchParams[] = [];
+    server.use(
+      http.get(readingsUrl, ({ request }) => {
+        searches.push(new URL(request.url).searchParams);
+        return HttpResponse.json([
+          { timestamp: "2026-01-01T00:30:00Z", temperature: 4 },
+        ]);
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<DeviceTelemetry device={device} />);
+    await screen.findByRole("button", { name: "temperature" });
+
+    // Choosing Custom keeps the current range until dates are applied.
+    await user.click(screen.getByRole("button", { name: "Custom" }));
+    const requestsBefore = searches.length;
+
+    fireEvent.change(screen.getByLabelText("From"), {
+      target: { value: "2026-01-01T00:00" },
+    });
+    fireEvent.change(screen.getByLabelText("To"), {
+      target: { value: "2026-01-02T12:00" },
+    });
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+
+    await waitFor(() => expect(searches.length).toBeGreaterThan(requestsBefore));
+    const last = searches[searches.length - 1];
+    expect(last.get("rangeStart")).toBe(new Date("2026-01-01T00:00").toISOString());
+    expect(last.get("rangeEnd")).toBe(new Date("2026-01-02T12:00").toISOString());
+  });
+
+  it("won't apply a custom range that ends before it starts", async () => {
+    server.use(
+      http.get(readingsUrl, () =>
+        HttpResponse.json([{ timestamp: "2026-01-01T00:30:00Z", temperature: 4 }]),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<DeviceTelemetry device={device} />);
+    await screen.findByRole("button", { name: "temperature" });
+
+    await user.click(screen.getByRole("button", { name: "Custom" }));
+    fireEvent.change(screen.getByLabelText("From"), {
+      target: { value: "2026-01-02T00:00" },
+    });
+    fireEvent.change(screen.getByLabelText("To"), {
+      target: { value: "2026-01-01T00:00" },
+    });
+    expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled();
+    expect(screen.getByText("From must be before To.")).toBeInTheDocument();
   });
 
   it("toggles a series off", async () => {
@@ -161,7 +243,7 @@ describe("DeviceTelemetry", () => {
     ).toBeInTheDocument();
   });
 
-  it("surfaces data-api errors", async () => {
+  it("surfaces telemetry errors", async () => {
     server.use(
       http.get(readingsUrl, () => new HttpResponse(null, { status: 500 })),
     );

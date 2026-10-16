@@ -10,7 +10,6 @@ HEADERS_FILE=/etc/nginx/rriv/security-headers.conf
 cat > "$CONFIG_FILE" <<EOF
 window.__RRIV_CONFIG__ = {
   apiBaseUrl: "${RRIV_API_BASE_URL:-}",
-  dataApiBaseUrl: "${RRIV_DATA_API_URL:-}",
   keycloakUrl: "${RRIV_KEYCLOAK_URL:-}",
   keycloakRealm: "${RRIV_KEYCLOAK_REALM:-}",
   keycloakClientId: "${RRIV_KEYCLOAK_CLIENT_ID:-}"
@@ -25,9 +24,8 @@ origin() {
 }
 
 API_ORIGIN=$(origin "${RRIV_API_BASE_URL:-}")
-DATA_ORIGIN=$(origin "${RRIV_DATA_API_URL:-}")
 KC_ORIGIN=$(origin "${RRIV_KEYCLOAK_URL:-}")
-ORIGINS=$(printf '%s\n' "$API_ORIGIN" "$DATA_ORIGIN" "$KC_ORIGIN" \
+ORIGINS=$(printf '%s\n' "$API_ORIGIN" "$KC_ORIGIN" \
   | awk 'NF && !seen[$0]++' | tr '\n' ' ')
 
 # Content-Security-Policy. `script-src 'self'` is strict: the app has no inline

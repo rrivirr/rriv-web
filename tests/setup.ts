@@ -1,6 +1,8 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, configure } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll } from "vitest";
+// jsdom has no canvas; the telemetry chart (uPlot) draws on one.
+import "vitest-canvas-mock";
 import { server } from "./helpers/server";
 
 // Match src/main.tsx: StrictMode mounts, unmounts and remounts every
@@ -22,7 +24,7 @@ if (typeof window !== "undefined" && !window.matchMedia) {
   })) as unknown as typeof window.matchMedia;
 }
 
-// recharts' ResponsiveContainer observes its box.
+// The telemetry chart resizes with its box.
 if (typeof globalThis.ResizeObserver === "undefined") {
   globalThis.ResizeObserver = class {
     observe() {}
