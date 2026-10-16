@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/rrivirr/rriv-web/compare/v1.0.6...v1.1.0) (2026-10-12)
+
+
+### Features
+
+* connect to the board ([c603b7b](https://github.com/rrivirr/rriv-web/commit/c603b7b624c20bcec405436bc16d7890fd518540))
+
 ## [1.0.6](https://github.com/rrivirr/rriv-web/compare/v1.0.5...v1.0.6) (2026-10-05)
 
 
