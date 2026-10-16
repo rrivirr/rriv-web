@@ -1,3 +1,10 @@
+# [1.2.0](https://github.com/rrivirr/rriv-web/compare/v1.1.0...v1.2.0) (2026-10-16)
+
+
+### Features
+
+* device telemetry page rewrite ([ab7f1e6](https://github.com/rrivirr/rriv-web/commit/ab7f1e65809716f849e124bb3b8a876183f91b52))
+
 # [1.1.0](https://github.com/rrivirr/rriv-web/compare/v1.0.6...v1.1.0) (2026-10-12)
 
 
