@@ -3,12 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 import {
   readingAt,
   seriesColor,
-  TelemetryChart,
+  ReadingsChart,
   toAlignedData,
-} from "@/components/TelemetryChart";
-import type { TelemetryPoint } from "@/api/telemetry";
+} from "@/components/ReadingsChart";
+import type { ReadingPoint } from "@/api/readings";
 
-const points: TelemetryPoint[] = [
+const points: ReadingPoint[] = [
   { t: 1000, temperature: 4, ph: 7 },
   { t: 2000, temperature: null, ph: 7.1 },
   { t: 3000, temperature: 5, ph: null },
@@ -35,10 +35,10 @@ describe("readingAt", () => {
   });
 });
 
-describe("TelemetryChart", () => {
+describe("ReadingsChart", () => {
   it("draws on a canvas and cleans up on unmount", () => {
     const { container, unmount } = render(
-      <TelemetryChart
+      <ReadingsChart
         data={points}
         keys={keys}
         hidden={new Set()}
@@ -63,10 +63,10 @@ describe("TelemetryChart", () => {
       onSelectTime: vi.fn(),
     };
     const { container, rerender } = render(
-      <TelemetryChart {...props} hidden={new Set()} />,
+      <ReadingsChart {...props} hidden={new Set()} />,
     );
     const chart = container.querySelector(".uplot");
-    rerender(<TelemetryChart {...props} hidden={new Set(["ph"])} />);
+    rerender(<ReadingsChart {...props} hidden={new Set(["ph"])} />);
     expect(container.querySelector(".uplot")).toBe(chart);
   });
 });

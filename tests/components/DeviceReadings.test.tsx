@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
-import { DeviceTelemetry } from "@/components/DeviceTelemetry";
+import { DeviceReadings } from "@/components/DeviceReadings";
 import type { ConfigHistoryItem, Device, FirmwareHistoryItem } from "@/api/types";
 import { renderWithProviders } from "../helpers/render";
 import { server } from "../helpers/server";
@@ -15,7 +15,7 @@ const device: Device = {
   DeviceEuis: [{ eui: "eui-1" }],
 };
 
-const readingsUrl = "http://api.test/device/:id/telemetry";
+const readingsUrl = "http://api.test/device/:id/readings";
 const configHistoryUrl = "http://api.test/configSnapshot/history";
 const firmwareHistoryUrl = "http://api.test/device/firmware/history";
 
@@ -39,7 +39,7 @@ const firmware: FirmwareHistoryItem[] = [
   },
 ];
 
-describe("DeviceTelemetry", () => {
+describe("DeviceReadings", () => {
   // The component fetches its own range-scoped markers (and as-at state), so
   // every render needs the history endpoints stubbed.
   beforeEach(() => {
@@ -53,7 +53,7 @@ describe("DeviceTelemetry", () => {
 
   it("prompts for an EUI when none is registered", () => {
     renderWithProviders(
-      <DeviceTelemetry device={{ ...device, DeviceEuis: [] }} />,
+      <DeviceReadings device={{ ...device, DeviceEuis: [] }} />,
     );
     expect(screen.getByText("No EUI registered")).toBeInTheDocument();
   });
@@ -68,7 +68,7 @@ describe("DeviceTelemetry", () => {
       ),
     );
 
-    renderWithProviders(<DeviceTelemetry device={device} />);
+    renderWithProviders(<DeviceReadings device={device} />);
 
     expect(await screen.findByRole("button", { name: "temperature" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "ph" })).toBeInTheDocument();
@@ -89,10 +89,10 @@ describe("DeviceTelemetry", () => {
       ),
     );
     const user = userEvent.setup();
-    renderWithProviders(<DeviceTelemetry device={device} />);
+    renderWithProviders(<DeviceReadings device={device} />);
 
     await user.click(await screen.findByRole("button", { name: "Enlarge chart" }));
-    const dialog = screen.getByRole("dialog", { name: "Telemetry · logger-a" });
+    const dialog = screen.getByRole("dialog", { name: "Readings · logger-a" });
     // The overlay has its own series toggles, sharing the page's state.
     expect(
       screen.getAllByRole("button", { name: "temperature" }),
@@ -119,7 +119,7 @@ describe("DeviceTelemetry", () => {
       }),
     );
     const user = userEvent.setup();
-    renderWithProviders(<DeviceTelemetry device={device} />);
+    renderWithProviders(<DeviceReadings device={device} />);
     await screen.findByRole("button", { name: "temperature" });
 
     // Choosing Custom keeps the current range until dates are applied.
@@ -147,7 +147,7 @@ describe("DeviceTelemetry", () => {
       ),
     );
     const user = userEvent.setup();
-    renderWithProviders(<DeviceTelemetry device={device} />);
+    renderWithProviders(<DeviceReadings device={device} />);
     await screen.findByRole("button", { name: "temperature" });
 
     await user.click(screen.getByRole("button", { name: "Custom" }));
@@ -169,7 +169,7 @@ describe("DeviceTelemetry", () => {
       ),
     );
 
-    renderWithProviders(<DeviceTelemetry device={device} />);
+    renderWithProviders(<DeviceReadings device={device} />);
 
     const toggle = await screen.findByRole("button", { name: "temperature" });
     await user.click(toggle);
@@ -210,7 +210,7 @@ describe("DeviceTelemetry", () => {
       ),
     );
 
-    renderWithProviders(<DeviceTelemetry device={device} />);
+    renderWithProviders(<DeviceReadings device={device} />);
 
     await user.click(await screen.findByText("firmware v1.2.3"));
     expect(await screen.findByText(/In effect at/)).toBeInTheDocument();
@@ -233,7 +233,7 @@ describe("DeviceTelemetry", () => {
       http.get(firmwareHistoryUrl, () => HttpResponse.json([])),
     );
 
-    renderWithProviders(<DeviceTelemetry device={device} />);
+    renderWithProviders(<DeviceReadings device={device} />);
 
     expect(
       await screen.findByText("No readings in this window"),
@@ -243,15 +243,15 @@ describe("DeviceTelemetry", () => {
     ).toBeInTheDocument();
   });
 
-  it("surfaces telemetry errors", async () => {
+  it("surfaces readings errors", async () => {
     server.use(
       http.get(readingsUrl, () => new HttpResponse(null, { status: 500 })),
     );
 
-    renderWithProviders(<DeviceTelemetry device={device} />);
+    renderWithProviders(<DeviceReadings device={device} />);
 
     expect(
-      await screen.findByText(/Could not load telemetry/),
+      await screen.findByText(/Could not load readings/),
     ).toBeInTheDocument();
   });
 });

@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
-import type { TelemetryPoint } from "@/api/telemetry";
+import type { ReadingPoint } from "@/api/readings";
 
 /**
- * Telemetry line chart on a canvas (uPlot), so tens of thousands of readings
+ * Readings line chart on a canvas (uPlot), so tens of thousands of readings
  * stay smooth to hover. Every reading is drawn; the tooltip shows the exact
  * reading under the cursor. Drag to zoom into a time range, double-click to
  * reset.
@@ -38,7 +38,7 @@ export interface ChartMarker {
 
 /** uPlot's columnar data: the timestamps, then one column per series. */
 export function toAlignedData(
-  points: TelemetryPoint[],
+  points: ReadingPoint[],
   keys: string[],
 ): uPlot.AlignedData {
   return [
@@ -49,7 +49,7 @@ export function toAlignedData(
 
 /** The reading at a data index: its time and each visible series' value. */
 export function readingAt(
-  points: TelemetryPoint[],
+  points: ReadingPoint[],
   keys: string[],
   hidden: Set<string>,
   index: number,
@@ -100,14 +100,14 @@ interface Tooltip {
   flip: boolean;
 }
 
-export function TelemetryChart({
+export function ReadingsChart({
   data,
   keys,
   hidden,
   markers,
   onSelectTime,
 }: {
-  data: TelemetryPoint[];
+  data: ReadingPoint[];
   keys: string[];
   hidden: Set<string>;
   markers: ChartMarker[];

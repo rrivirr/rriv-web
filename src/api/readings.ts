@@ -12,12 +12,12 @@ export interface Reading {
   [key: string]: unknown;
 }
 
-export interface TelemetryRange {
+export interface ReadingsRange {
   start: Date;
   end?: Date;
 }
 
-export interface TelemetryPoint {
+export interface ReadingPoint {
   t: number;
   [key: string]: number | null;
 }
@@ -30,13 +30,13 @@ export interface TelemetryPoint {
  */
 export function useReadings(
   deviceId: string | undefined,
-  range: TelemetryRange | null,
+  range: ReadingsRange | null,
   options: { enabled?: boolean } = {},
 ) {
   const api = useApiClient();
   return useQuery({
     queryKey: [
-      "telemetry",
+      "readings",
       deviceId ?? "",
       range?.start.toISOString() ?? null,
       range?.end?.toISOString() ?? null,
@@ -48,7 +48,7 @@ export function useReadings(
       });
       if (range!.end) params.set("rangeEnd", range!.end.toISOString());
       return api.get<Reading[]>(
-        `/device/${encodeURIComponent(deviceId!)}/telemetry?${params.toString()}`,
+        `/device/${encodeURIComponent(deviceId!)}/readings?${params.toString()}`,
         { signal },
       );
     },
@@ -82,11 +82,11 @@ export function numericSeriesKeys(readings: Reading[]): string[] {
 export function toChartData(
   readings: Reading[],
   keys: string[],
-): TelemetryPoint[] {
+): ReadingPoint[] {
   return readings
     .map((row) => {
       const t = Date.parse(String(row.timestamp));
-      const point: TelemetryPoint = { t };
+      const point: ReadingPoint = { t };
       for (const key of keys) {
         const value = row[key];
         const numeric =

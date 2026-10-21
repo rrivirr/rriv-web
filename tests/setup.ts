@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, configure } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll } from "vitest";
-// jsdom has no canvas; the telemetry chart (uPlot) draws on one.
+// jsdom has no canvas; the readings chart (uPlot) draws on one.
 import "vitest-canvas-mock";
 import { server } from "./helpers/server";
 
@@ -24,7 +24,7 @@ if (typeof window !== "undefined" && !window.matchMedia) {
   })) as unknown as typeof window.matchMedia;
 }
 
-// The telemetry chart resizes with its box.
+// The readings chart resizes with its box.
 if (typeof globalThis.ResizeObserver === "undefined") {
   globalThis.ResizeObserver = class {
     observe() {}

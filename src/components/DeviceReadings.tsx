@@ -6,7 +6,7 @@ import {
   IconExpand,
   IconRefresh,
 } from "@/assets/Icons";
-import { numericSeriesKeys, toChartData, useReadings } from "@/api/telemetry";
+import { numericSeriesKeys, toChartData, useReadings } from "@/api/readings";
 import { useConfigHistory, useFirmwareHistory } from "@/api/configs";
 import type { Device } from "@/api/types";
 import { Badge } from "@/components/Badge";
@@ -16,9 +16,9 @@ import { QueryError } from "@/components/QueryError";
 import { Skeleton } from "@/components/Skeleton";
 import {
   MARKER_STYLES,
-  TelemetryChart,
+  ReadingsChart,
   seriesColor,
-} from "@/components/TelemetryChart";
+} from "@/components/ReadingsChart";
 import { formatDate, formatRelative } from "@/lib/format";
 
 const PRESETS = [
@@ -36,11 +36,14 @@ function toLocalInput(date: Date): string {
   return local.toISOString().slice(0, 16);
 }
 
-export function DeviceTelemetry({ device }: { device: Device }) {
+export function DeviceReadings({ device }: { device: Device }) {
   const eui = device.DeviceEuis?.[0]?.eui;
   const [preset, setPreset] = useState<PresetId | "custom">("24h");
   // The applied custom range, and the inputs being edited before Apply.
-  const [customRange, setCustomRange] = useState<{ start: Date; end: Date } | null>(null);
+  const [customRange, setCustomRange] = useState<{
+    start: Date;
+    end: Date;
+  } | null>(null);
   const [draft, setDraft] = useState({ from: "", to: "" });
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [selectedTime, setSelectedTime] = useState<number | null>(null);
@@ -69,7 +72,10 @@ export function DeviceTelemetry({ device }: { device: Device }) {
     // Keep showing the current range until new dates are applied.
     const current = { start: range.start, end: range.end ?? new Date() };
     setCustomRange(current);
-    setDraft({ from: toLocalInput(current.start), to: toLocalInput(current.end) });
+    setDraft({
+      from: toLocalInput(current.start),
+      to: toLocalInput(current.end),
+    });
     setPreset("custom");
   }
 
@@ -125,9 +131,8 @@ export function DeviceTelemetry({ device }: { device: Device }) {
 
   // Point-in-time state is resolved server-side (`asAt`), so it stays correct
   // even when the applied-config history exceeds one page.
-  const asAtIso = selectedTime == null
-    ? undefined
-    : new Date(selectedTime).toISOString();
+  const asAtIso =
+    selectedTime == null ? undefined : new Date(selectedTime).toISOString();
   const asAtConfigQuery = useConfigHistory(
     device.serialNumber,
     { asAt: asAtIso },
@@ -143,8 +148,7 @@ export function DeviceTelemetry({ device }: { device: Device }) {
     ...(asAtConfigQuery.data?.dataloggerConfigs ?? []),
   ];
   const asAtFirmware = asAtFirmwareQuery.data?.[0] ?? null;
-  const asAtLoading = asAtConfigQuery.isLoading ||
-    asAtFirmwareQuery.isLoading;
+  const asAtLoading = asAtConfigQuery.isLoading || asAtFirmwareQuery.isLoading;
   const asAtError = asAtConfigQuery.isError || asAtFirmwareQuery.isError;
 
   function toggleSeries(key: string) {
@@ -161,7 +165,7 @@ export function DeviceTelemetry({ device }: { device: Device }) {
       <EmptyState
         icon={<IconActivity className="h-5 w-5" />}
         title="No EUI registered"
-        description="Telemetry is keyed by LoRaWAN EUI. Register an EUI for this device to see its readings."
+        description="Readings are keyed by LoRaWAN EUI. Register an EUI for this device to see its readings."
       />
     );
   }
@@ -198,7 +202,7 @@ export function DeviceTelemetry({ device }: { device: Device }) {
   );
 
   const chart = (
-    <TelemetryChart
+    <ReadingsChart
       data={chartData}
       keys={keys}
       hidden={hidden}
@@ -256,7 +260,8 @@ export function DeviceTelemetry({ device }: { device: Device }) {
           className="flex flex-wrap items-end gap-3"
           onSubmit={(event) => {
             event.preventDefault();
-            if (draftValid) setCustomRange({ start: draftFrom!, end: draftTo! });
+            if (draftValid)
+              setCustomRange({ start: draftFrom!, end: draftTo! });
           }}
         >
           <label className="space-y-1 text-xs text-fg-muted">
@@ -266,7 +271,9 @@ export function DeviceTelemetry({ device }: { device: Device }) {
               className="field py-1.5 text-xs"
               value={draft.from}
               max={draft.to || undefined}
-              onChange={(event) => setDraft({ ...draft, from: event.target.value })}
+              onChange={(event) =>
+                setDraft({ ...draft, from: event.target.value })
+              }
               aria-invalid={Boolean(draft.from && draft.to) && !draftValid}
             />
           </label>
@@ -277,7 +284,9 @@ export function DeviceTelemetry({ device }: { device: Device }) {
               className="field py-1.5 text-xs"
               value={draft.to}
               min={draft.from || undefined}
-              onChange={(event) => setDraft({ ...draft, to: event.target.value })}
+              onChange={(event) =>
+                setDraft({ ...draft, to: event.target.value })
+              }
               aria-invalid={Boolean(draft.from && draft.to) && !draftValid}
             />
           </label>
@@ -295,14 +304,14 @@ export function DeviceTelemetry({ device }: { device: Device }) {
       )}
 
       {query.isError ? (
-        <QueryError error={query.error} label="telemetry" />
+        <QueryError error={query.error} label="readings" />
       ) : query.isPending ? (
         <Skeleton className="h-80 rounded-xl" />
       ) : rows.length === 0 ? (
         <EmptyState
           icon={<IconActivity className="h-5 w-5" />}
           title="No readings in this window"
-          description={`No telemetry for ${eui} in the selected range. Try a wider window.`}
+          description={`Try a wider window.`}
         />
       ) : (
         <>
@@ -331,13 +340,13 @@ export function DeviceTelemetry({ device }: { device: Device }) {
               <div
                 role="dialog"
                 aria-modal="true"
-                aria-label={`Telemetry · ${device.uniqueName}`}
+                aria-label={`Readings · ${device.uniqueName}`}
                 className="surface flex h-[90vh] w-full max-w-6xl flex-col gap-3 p-4"
                 onClick={(event) => event.stopPropagation()}
               >
                 <div className="flex items-center justify-between gap-3">
                   <h2 className="text-sm font-medium text-fg">
-                    Telemetry · {device.uniqueName}
+                    Readings · {device.uniqueName}
                   </h2>
                   <button
                     type="button"
@@ -426,8 +435,8 @@ export function DeviceTelemetry({ device }: { device: Device }) {
                             v{asAtFirmware.version}
                           </span>
                           <span className="text-fg-subtle">
-                            {" "}· installed{" "}
-                            {formatDate(asAtFirmware.installedAt)}
+                            {" "}
+                            · installed {formatDate(asAtFirmware.installedAt)}
                           </span>
                         </>
                       ) : (

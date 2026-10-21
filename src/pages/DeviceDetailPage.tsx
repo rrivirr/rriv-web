@@ -34,10 +34,10 @@ import { formatDate, formatRelative } from "@/lib/format";
 
 const PAGE_SIZE = 10;
 
-/** Load the telemetry panel (and its chart library) only when the device page needs it. */
-const DeviceTelemetry = lazy(() =>
-  import("@/components/DeviceTelemetry").then((module) => ({
-    default: module.DeviceTelemetry,
+/** Load the readings panel (and its chart library) only when the device page needs it. */
+const DeviceReadings = lazy(() =>
+  import("@/components/DeviceReadings").then((module) => ({
+    default: module.DeviceReadings,
   })),
 );
 
@@ -175,7 +175,7 @@ export function DeviceDetailPage() {
           <EmptyState
             icon={<IconMapPin className="h-5 w-5" />}
             title="Not in a context"
-            description="Assign this device to a context in the RRIV app or CLI to apply configurations and read telemetry."
+            description="Assign this device to a context in the RRIV app or CLI to apply configurations and see its readings."
           />
         )}
       </SectionCard>
@@ -365,16 +365,16 @@ export function DeviceDetailPage() {
         </SectionCard>
       ) : null}
 
-      {/* ------------------------------------------------------ Telemetry */}
+      {/* ------------------------------------------------------- Readings */}
       <SectionCard
-        title="Telemetry"
+        title="Readings"
         subtitle="Readings from the data API, correlated with config and firmware"
       >
         {deviceQuery.isPending ? (
           <Skeleton className="h-80 rounded-xl" />
         ) : device ? (
           <Suspense fallback={<Skeleton className="h-80 rounded-xl" />}>
-            <DeviceTelemetry device={device} />
+            <DeviceReadings device={device} />
           </Suspense>
         ) : null}
       </SectionCard>

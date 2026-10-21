@@ -5,11 +5,11 @@ import {
   numericSeriesKeys,
   toChartData,
   useReadings,
-} from "@/api/telemetry";
+} from "@/api/readings";
 import { hookWrapper } from "../helpers/render";
 import { server } from "../helpers/server";
 
-const telemetryUrl = "http://api.test/device/:id/telemetry";
+const readingsUrl = "http://api.test/device/:id/readings";
 
 describe("numericSeriesKeys", () => {
   it("collects numeric and numeric-string channels, sorted naturally", () => {
@@ -71,7 +71,7 @@ describe("useReadings", () => {
   it("reads from rriv-api by device, with the user's token", async () => {
     let request: Request | undefined;
     server.use(
-      http.get(telemetryUrl, ({ request: incoming, params }) => {
+      http.get(readingsUrl, ({ request: incoming, params }) => {
         request = incoming;
         expect(params.id).toBe("d1");
         return HttpResponse.json([
@@ -96,7 +96,7 @@ describe("useReadings", () => {
   it("adds rangeEnd and surfaces API errors", async () => {
     let search = "";
     server.use(
-      http.get(telemetryUrl, ({ request }) => {
+      http.get(readingsUrl, ({ request }) => {
         search = new URL(request.url).search;
         return HttpResponse.json({ message: "unavailable" }, { status: 503 });
       }),

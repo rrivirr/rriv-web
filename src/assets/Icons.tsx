@@ -210,7 +210,7 @@ export function IconRefresh(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-/** Outward corner arrows — enlarge a panel (e.g. the telemetry chart). */
+/** Outward corner arrows — enlarge a panel (e.g. the readings chart). */
 export function IconExpand(props: SVGProps<SVGSVGElement>) {
   return (
     <Base {...props}>
