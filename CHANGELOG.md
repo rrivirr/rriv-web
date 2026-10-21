@@ -1,3 +1,10 @@
+## [1.2.1](https://github.com/rrivirr/rriv-web/compare/v1.2.0...v1.2.1) (2026-10-21)
+
+
+### Bug Fixes
+
+* device readings graph rewrite ([b084ac4](https://github.com/rrivirr/rriv-web/commit/b084ac4c82f82daef91a82413ae61c168312b19f))
+
 # [1.2.0](https://github.com/rrivirr/rriv-web/compare/v1.1.0...v1.2.0) (2026-10-16)
 
 
