@@ -98,6 +98,33 @@ export async function readDevice(client: SerialClient): Promise<DeviceInfo> {
   };
 }
 
+export interface BootloaderInfo {
+  version: string | null;
+  /** A valid app is installed, so the board can leave update mode. */
+  appValid: boolean;
+}
+
+/**
+ * The bootloader's reply to an app command: the board is in update mode.
+ * `{"status":"error","message":"in bootloader mode",…}`
+ */
+export const isBootloaderReply = (cause: unknown) =>
+  cause instanceof SerialError && cause.response?.message === "in bootloader mode";
+
+/** `{"object":"bootloader","action":"info"}` → bootloader version + app check. */
+export async function readBootloaderInfo(client: SerialClient): Promise<BootloaderInfo> {
+  const response = await client.send({ object: "bootloader", action: "info" });
+  return { version: asString(response.version), appValid: response.app_valid === true };
+}
+
+/**
+ * `{"object":"bootloader","action":"boot"}`: leave update mode. The board
+ * resets into the app, so the connection drops and comes back.
+ */
+export async function startApp(client: SerialClient): Promise<void> {
+  await client.send({ object: "bootloader", action: "boot" });
+}
+
 /** Board firmware version (the board replies with a JSON-encoded `message`). */
 export async function readBoardVersion(
   client: SerialClient,

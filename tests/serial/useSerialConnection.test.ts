@@ -2,7 +2,13 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { type SerialPort, type WatchFrame, type WatchSink, useSerialConnection } from "@/serial";
 import { hookWrapper } from "../helpers/render";
-import { boardPort, defaultBoard, installSerial, uninstallSerial } from "./fakeBoard";
+import {
+  boardPort,
+  bootloaderBoard,
+  defaultBoard,
+  installSerial,
+  uninstallSerial,
+} from "./fakeBoard";
 
 function renderConnection() {
   return renderHook(() => useSerialConnection(), { wrapper: hookWrapper() });
@@ -212,5 +218,34 @@ describe("useSerialConnection", () => {
     expect(result.current.waitingForBoot).toBe(false);
     expect(result.current.restart).toMatchObject({ kind: "crash", message: "stack overflow" });
   });
-});
 
+  it("recognises a board in update mode and starts its app", async () => {
+    const board = boardPort(bootloaderBoard());
+    const serial = installSerial([board.port]);
+    const { result } = renderConnection();
+    await waitFor(() => expect(result.current.ports).toHaveLength(1));
+    await act(() => result.current.connect(board.port));
+
+    expect(result.current.status).toBe("bootloader");
+    expect(result.current.error).toBeNull();
+    expect(result.current.info).toBeNull();
+    expect(result.current.bootloader).toEqual({ version: "0.1.0", appValid: true });
+    expect(result.current.client).not.toBeNull();
+
+    await act(() => result.current.startApp());
+    expect(board.written).toContainEqual({ object: "bootloader", action: "boot" });
+    // The bootloader resets into the app: the port drops and comes back.
+    await act(async () => {
+      board.unplug();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await waitFor(() => expect(result.current.status).toBe("lost"));
+    expect(result.current.error).toMatch(/Starting the app/);
+    expect(result.current.bootloader).toBeNull();
+
+    const app = boardPort(defaultBoard);
+    await act(async () => serial.fire("connect", app.port as SerialPort));
+    await waitFor(() => expect(result.current.status).toBe("connected"));
+    expect(result.current.info?.serialNumber).toBe("SN-1");
+  });
+});

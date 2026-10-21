@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import { Badge } from "@/components/Badge";
 import { SectionCard } from "@/components/SectionCard";
 import { formatRelative } from "@/lib/format";
-import { type SerialConnection, setMode } from "@/serial";
+import { type SerialConnection, serialSend, setMode } from "@/serial";
 import type { BoardLink } from "./useBoardLink";
 import { syncFeedback } from "./syncFeedback";
 import { Field, FeedbackCallout, button, input, label, useTask } from "./ui";
@@ -19,7 +19,9 @@ export function OverviewTab({
 }) {
   const board = useTask();
   const cloud = useTask();
+  const usartTask = useTask();
   const [application, setApplication] = useState("");
+  const [usart, setUsart] = useState("");
   const { device, placement } = link;
   const mode = typeof serial.datalogger?.mode === "string" ? serial.datalogger.mode : null;
   // What the cloud has on record; the board itself is only asked on Register.
@@ -95,6 +97,42 @@ export function OverviewTab({
                 : "Clock not synced from this browser"}
             </span>
           </div>
+        </div>
+      </SectionCard>
+
+      <SectionCard
+        title="Serial out"
+        subtitle="Forward a message out of the board's USART port. Prefix with 0x to send hex."
+      >
+        <form
+          className="flex flex-col gap-2 sm:flex-row sm:items-end"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void usartTask.run("usart", async () => {
+              await serialSend(serial.client!, usart);
+              setUsart("");
+              return { tone: "success", message: "Message sent." };
+            });
+          }}
+        >
+          <label className="block flex-1">
+            <span className={label}>Message</span>
+            <input
+              className={`${input} mt-1 font-mono text-xs`}
+              value={usart}
+              onChange={(event) => setUsart(event.target.value)}
+            />
+          </label>
+          <button
+            type="submit"
+            className={button}
+            disabled={locked || usartTask.busy !== null || !serial.client || !usart}
+          >
+            {usartTask.busy === "usart" ? "Sending…" : "Send"}
+          </button>
+        </form>
+        <div className="mt-3">
+          <FeedbackCallout feedback={usartTask.feedback} />
         </div>
       </SectionCard>
 

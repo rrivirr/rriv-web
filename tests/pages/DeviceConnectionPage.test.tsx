@@ -6,7 +6,12 @@ import type { Device } from "@/api/types";
 import { DeviceConnectionPage } from "@/pages/DeviceConnectionPage";
 import { renderWithProviders } from "../helpers/render";
 import { server } from "../helpers/server";
-import { boardPort, installSerial, uninstallSerial } from "../serial/fakeBoard";
+import {
+  boardPort,
+  bootloaderBoard,
+  installSerial,
+  uninstallSerial,
+} from "../serial/fakeBoard";
 
 const API = "http://api.test";
 const UID = "0123456789ABCDEF01234567";
@@ -182,6 +187,40 @@ describe("DeviceConnectionPage", () => {
     expect(screen.getByText(/does not support Web Serial/i)).toBeInTheDocument();
   });
 
+  it("shows a board in update mode and offers to start its app", async () => {
+    const board = boardPort(bootloaderBoard());
+    installSerial([], board.port);
+    const user = userEvent.setup();
+    server.use(...commonHandlers());
+
+    renderWithProviders(<DeviceConnectionPage />);
+    await connect(user);
+
+    expect(screen.getByText("Board is in update mode")).toBeInTheDocument();
+    expect(screen.getByText("Installed")).toBeInTheDocument();
+    // The console offers bootloader commands, not the app's.
+    expect(screen.getByRole("button", { name: "bootloader info" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "device get" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Start the app" }));
+    await waitFor(() =>
+      expect(board.written).toContainEqual({ object: "bootloader", action: "boot" }),
+    );
+  });
+
+  it("says when a board in update mode has no app to start", async () => {
+    installSerial([], boardPort(bootloaderBoard(false)).port);
+    const user = userEvent.setup();
+    server.use(...commonHandlers());
+
+    renderWithProviders(<DeviceConnectionPage />);
+    await connect(user);
+
+    expect(screen.getByText("Not installed")).toBeInTheDocument();
+    expect(screen.getByText(/No valid firmware is installed/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start the app" })).not.toBeInTheDocument();
+  });
+
   it("connects a linked board straight into the workspace", async () => {
     const board = makeBoard();
     installSerial([], board.port);
@@ -203,6 +242,25 @@ describe("DeviceConnectionPage", () => {
     expect(
       board.written.filter((command) => command.object === "device" && command.action === "get"),
     ).toHaveLength(1);
+  });
+
+  it("forwards a message out of the board's USART from the Overview tab", async () => {
+    const board = makeBoard();
+    installSerial([], board.port);
+    const user = userEvent.setup();
+    server.use(...commonHandlers(), http.get(`${API}/device`, () => HttpResponse.json([device])));
+
+    renderWithProviders(<DeviceConnectionPage />);
+    await connect(user);
+
+    await user.type(await screen.findByRole("textbox", { name: "Message" }), "0xBEEF");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    expect(await screen.findByText("Message sent.")).toBeInTheDocument();
+    expect(board.written).toContainEqual({ object: "serial", action: "send", message: "BEEF" });
+
+    // It lives on Overview, not in the console.
+    await user.click(screen.getByRole("tab", { name: "Console" }));
+    expect(screen.queryByText("Serial out")).not.toBeInTheDocument();
   });
 
   it("reads the board's EUIs only when the user registers them", async () => {
@@ -784,7 +842,7 @@ describe("DeviceConnectionPage", () => {
 
     // The next command crashes the board, which then drops off USB.
     board.state.crashNext = true;
-    await user.click(screen.getByRole("button", { name: "memory check" }));
+    await user.click(screen.getByRole("button", { name: "sensor list" }));
     expect(
       (await screen.findAllByText(/crashed \(heap exhausted\) and is restarting/)).length,
     ).toBeGreaterThan(0);

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  type BootloaderInfo,
   type DeviceInfo,
   MAX_WATCH_FRAMES,
   RRIV_USB_FILTER,
@@ -13,18 +14,23 @@ import {
   describePort,
   getDatalogger,
   getWebSerial,
+  isBootloaderReply,
   isWebSerialSupported,
   parseBoardStatus,
   readBoardVersion,
+  readBootloaderInfo,
   readDevice,
   setClock,
+  startApp as bootApp,
 } from ".";
 
 /**
  * - `lost`: the board went away (unplugged or re-enumerated after a reboot)
  *   without the user disconnecting.
+ * - `bootloader`: the port is open but the board is in update mode, so only
+ *   bootloader commands work.
  */
-export type SerialStatus = "idle" | "connecting" | "connected" | "lost" | "error";
+export type SerialStatus = "idle" | "connecting" | "connected" | "bootloader" | "lost" | "error";
 
 export interface PortOption {
   port: SerialPort;
@@ -87,6 +93,10 @@ export interface SerialConnection {
   waitingForBoot: boolean;
   /** The board crashed or restarted during this session. */
   restart: RestartNotice | null;
+  /** What the bootloader reported, while `status` is `bootloader`. */
+  bootloader: BootloaderInfo | null;
+  /** Leave update mode; the board reconnects running the app. */
+  startApp: () => Promise<void>;
   dismissRestart: () => void;
   transcript: TranscriptEntry[];
   /** True while the board is streaming `watch` frames. */
@@ -146,6 +156,7 @@ export function useSerialConnection(): SerialConnection {
   const [connectedAt, setConnectedAt] = useState(0);
   const [waitingForBoot, setWaitingForBoot] = useState(false);
   const [restart, setRestart] = useState<RestartNotice | null>(null);
+  const [bootloader, setBootloader] = useState<BootloaderInfo | null>(null);
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [watching, setWatching] = useState(false);
   const [frames, setFrames] = useState<WatchFrame[]>([]);
@@ -163,6 +174,8 @@ export function useSerialConnection(): SerialConnection {
   const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nextEntryId = useRef(0);
   const crashRef = useRef<{ message: string; at: number } | null>(null);
+  /** `startApp` was sent: the coming disconnect is the board resetting into the app. */
+  const startingAppRef = useRef(false);
 
   const updateStatus = useCallback((next: SerialStatus) => {
     statusRef.current = next;
@@ -307,6 +320,7 @@ export function useSerialConnection(): SerialConnection {
       setDetailsRead(false);
       setBoardVersion(null);
       setDatalogger(null);
+      setBootloader(null);
       activePortRef.current = port;
       setActivePort(port);
 
@@ -348,39 +362,54 @@ export function useSerialConnection(): SerialConnection {
           if (clientRef.current !== started) return;
           dropClient();
           updateStatus("lost");
+          setBootloader(null);
           const crash = recentCrash();
+          const startingApp = startingAppRef.current;
+          startingAppRef.current = false;
           setError(
             crash
               ? crashText(crash.message)
-              : "The board disconnected. Plug it back in to reconnect.",
+              : startingApp
+                ? "Starting the app. The board reconnects automatically."
+                : "The board disconnected. Plug it back in to reconnect.",
           );
         });
 
         // Only the identity is read here. Details and the clock wait until the
         // caller confirms the board is the user's (see useBoardLink).
-        if (afterLoss) {
-          // Listen from the start so a `datalogger-ready` sent while the first
-          // read is in flight isn't missed.
-          const booted = started.waitForLine(isReadyLine, BOOT_WAIT_MS);
-          const waitForBoot = async () => {
-            setWaitingForBoot(true);
+        try {
+          if (afterLoss) {
+            // Listen from the start so a `datalogger-ready` sent while the first
+            // read is in flight isn't missed.
+            const booted = started.waitForLine(isReadyLine, BOOT_WAIT_MS);
+            const waitForBoot = async () => {
+              setWaitingForBoot(true);
+              try {
+                await booted;
+              } finally {
+                setWaitingForBoot(false);
+              }
+            };
+            // After a crash the board is certainly rebooting: don't talk over it.
+            if (recentCrash()) await waitForBoot();
             try {
-              await booted;
-            } finally {
-              setWaitingForBoot(false);
+              await refreshIdentity();
+            } catch (cause) {
+              if (!(cause instanceof SerialTimeoutError)) throw cause;
+              await waitForBoot();
+              await refreshIdentity();
             }
-          };
-          // After a crash the board is certainly rebooting: don't talk over it.
-          if (recentCrash()) await waitForBoot();
-          try {
-            await refreshIdentity();
-          } catch (cause) {
-            if (!(cause instanceof SerialTimeoutError)) throw cause;
-            await waitForBoot();
+          } else {
             await refreshIdentity();
           }
-        } else {
-          await refreshIdentity();
+        } catch (cause) {
+          if (!isBootloaderReply(cause)) throw cause;
+          // Update mode: the bootloader answers only its own commands.
+          setBootloader(await readBootloaderInfo(started));
+          crashRef.current = null;
+          updateStatus("bootloader");
+          void refreshPorts();
+          return;
         }
         crashRef.current = null;
         updateStatus("connected");
@@ -443,6 +472,18 @@ export function useSerialConnection(): SerialConnection {
 
   const dismissRestart = useCallback(() => setRestart(null), []);
 
+  const startApp = useCallback(async () => {
+    const active = clientRef.current;
+    if (!active || statusRef.current !== "bootloader") return;
+    startingAppRef.current = true;
+    try {
+      await bootApp(active);
+    } catch (cause) {
+      startingAppRef.current = false;
+      throw cause;
+    }
+  }, []);
+
   const disconnect = useCallback(async () => {
     const active = clientRef.current;
     dropClient();
@@ -458,7 +499,9 @@ export function useSerialConnection(): SerialConnection {
     setDetailsRead(false);
     setWaitingForBoot(false);
     setRestart(null);
+    setBootloader(null);
     crashRef.current = null;
+    startingAppRef.current = false;
   }, [dropClient, updateStatus]);
 
   const startWatch = useCallback(
@@ -552,6 +595,8 @@ export function useSerialConnection(): SerialConnection {
     waitingForBoot,
     restart,
     dismissRestart,
+    bootloader,
+    startApp,
     transcript,
     watching,
     frames,

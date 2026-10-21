@@ -73,6 +73,20 @@ export const defaultBoard: Responder = (command) => {
   return {};
 };
 
+/** A board in update mode: the bootloader answers only its own commands. */
+export function bootloaderBoard(appValid = true): Responder {
+  return (command) => {
+    if (command.object !== "bootloader") {
+      return { status: "error", message: "in bootloader mode", error: "unsupported command" };
+    }
+    if (command.action === "info") {
+      return { bootloader: "rriv", version: "0.1.0", app_valid: appValid };
+    }
+    if (command.action === "boot") return { message: "booting" };
+    return { status: "error", message: "unknown bootloader command", error: "" };
+  };
+}
+
 /** Install a fake `navigator.serial`. Returns a way to fire plug events. */
 export function installSerial(ports: SerialPort[], requested?: SerialPort | (() => never)) {
   const listeners = new Map<string, Set<(event: Event) => void>>();

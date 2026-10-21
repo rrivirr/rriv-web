@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useState } from "react";
 import { BoardHeader } from "@/components/connect/BoardHeader";
+import { BootloaderPanel } from "@/components/connect/BootloaderPanel";
 import { ConnectPanel } from "@/components/connect/ConnectPanel";
 import { ConsoleTab } from "@/components/connect/ConsoleTab";
 import { DataloggerTab } from "@/components/connect/DataloggerTab";
@@ -59,6 +60,20 @@ function DeviceConnection() {
   }, [serialNumber, serial.activePort]);
 
   const client = serial.client;
+  if (serial.status === "bootloader" && client) {
+    return (
+      <Page>
+        <BootloaderPanel serial={serial} />
+        <ConsoleTab
+          client={client}
+          transcript={serial.transcript}
+          onClear={serial.clearTranscript}
+          locked={false}
+          inBootloader
+        />
+      </Page>
+    );
+  }
   if (serial.status !== "connected" || !client) {
     return (
       <Page>

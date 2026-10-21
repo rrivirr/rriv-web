@@ -1,8 +1,8 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { SectionCard } from "@/components/SectionCard";
-import { type SerialClient, type TranscriptEntry, serialSend } from "@/serial";
+import { type SerialClient, type TranscriptEntry } from "@/serial";
 import { parseJsonObject } from "./ConfigForm";
-import { FeedbackCallout, button, input, label, primary, useTask } from "./ui";
+import { FeedbackCallout, button, input, primary, useTask } from "./ui";
 
 /** Read-only commands worth one click. */
 const QUICK_COMMANDS: Array<{ label: string; command: Record<string, unknown> }> = [
@@ -10,9 +10,12 @@ const QUICK_COMMANDS: Array<{ label: string; command: Record<string, unknown> }>
   { label: "board version", command: { object: "board", action: "get", parameter: "version" } },
   { label: "datalogger get", command: { object: "datalogger", action: "get" } },
   { label: "sensor list", command: { object: "sensor", action: "list" } },
-  { label: "telemeter get", command: { object: "telemeter", action: "get" } },
-  { label: "i2c list", command: { object: "board", action: "i2c", subcommand: "list" } },
-  { label: "memory check", command: { object: "board", action: "memory", subcommand: "check" } },
+];
+
+/** In update mode the bootloader understands only these. */
+const BOOTLOADER_COMMANDS: Array<{ label: string; command: Record<string, unknown> }> = [
+  { label: "bootloader info", command: { object: "bootloader", action: "info" } },
+  { label: "bootloader boot", command: { object: "bootloader", action: "boot" } },
 ];
 
 const timeOf = (iso: string) => new Date(iso).toLocaleTimeString();
@@ -22,15 +25,17 @@ export function ConsoleTab({
   transcript,
   onClear,
   locked,
+  inBootloader = false,
 }: {
   client: SerialClient;
   transcript: TranscriptEntry[];
   onClear: () => void;
   locked: boolean;
+  /** The board is in update mode: offer the bootloader's commands. */
+  inBootloader?: boolean;
 }) {
   const task = useTask();
   const [command, setCommand] = useState("");
-  const [usart, setUsart] = useState("");
   const scroller = useRef<HTMLDivElement>(null);
   const disabled = locked || task.busy !== null;
 
@@ -88,7 +93,7 @@ export function ConsoleTab({
           </div>
 
           <div className="flex flex-wrap gap-1.5">
-            {QUICK_COMMANDS.map((quick) => (
+            {(inBootloader ? BOOTLOADER_COMMANDS : QUICK_COMMANDS).map((quick) => (
               <button
                 key={quick.label}
                 type="button"
@@ -106,7 +111,11 @@ export function ConsoleTab({
               className={`${input} font-mono text-xs`}
               aria-label="JSON command"
               spellCheck={false}
-              placeholder='{"object":"sensor","action":"get","id":"temp01"}'
+              placeholder={
+                inBootloader
+                  ? '{"object":"bootloader","action":"info"}'
+                  : '{"object":"sensor","action":"get","id":"temp01"}'
+              }
               value={command}
               onChange={(event) => setCommand(event.target.value)}
             />
@@ -116,35 +125,6 @@ export function ConsoleTab({
           </form>
           <FeedbackCallout feedback={task.feedback} />
         </div>
-      </SectionCard>
-
-      <SectionCard
-        title="Serial out"
-        subtitle="Forward a message out of the board's USART port. Prefix with 0x to send hex."
-      >
-        <form
-          className="flex flex-col gap-2 sm:flex-row sm:items-end"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void task.run("usart", async () => {
-              await serialSend(client, usart);
-              setUsart("");
-              return { tone: "success", message: "Message sent." };
-            });
-          }}
-        >
-          <label className="block flex-1">
-            <span className={label}>Message</span>
-            <input
-              className={`${input} mt-1 font-mono text-xs`}
-              value={usart}
-              onChange={(event) => setUsart(event.target.value)}
-            />
-          </label>
-          <button type="submit" className={button} disabled={disabled || !usart}>
-            {task.busy === "usart" ? "Sending…" : "Send"}
-          </button>
-        </form>
       </SectionCard>
     </>
   );
