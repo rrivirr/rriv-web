@@ -10,6 +10,7 @@ import {
   boardPort,
   bootloaderBoard,
   installSerial,
+  signedImage,
   uninstallSerial,
 } from "../serial/fakeBoard";
 
@@ -69,6 +70,8 @@ function makeBoard(initial: { serialNumber?: string } = {}) {
     sensors: new Map<string, Command>([["temp01", { id: "temp01", type: "ds18b20", wait_time: 5 }]]),
     /** Crash on the next command: panic, then drop off USB like the watchdog reset. */
     crashNext: false,
+    /** `board get startup`; `null` answers like firmware without a start-up log. */
+    startup: null as Command | null,
   };
   const respond = (command: Command): Command | string | null => {
     const { object, action, id } = command;
@@ -84,7 +87,21 @@ function makeBoard(initial: { serialNumber?: string } = {}) {
       state.serialNumber = String(command.serial_number);
       return { message: "ok" };
     }
+    if (object === "board" && action === "get" && command.parameter === "startup" && state.startup) {
+      return { startup: state.startup };
+    }
     if (object === "board" && action === "get") return { message: JSON.stringify({ fv: "9.9.9" }) };
+    if (object === "datalogger" && action === "reset") {
+      setTimeout(() => board.unplug(), 20);
+      return { message: "datalogger reset, restarting" };
+    }
+    if (object === "device" && action === "reset") {
+      if (command.serial_number !== state.serialNumber) {
+        return { status: "error", message: "serial_number must be this board's serial number", error: "" };
+      }
+      setTimeout(() => board.unplug(), 20);
+      return { message: "device reset, restarting" };
+    }
     if (object === "board" && action === "set") return { message: "Epoch set" };
     if (object === "telemeter") return { dev_eui: "DEVEUI1", join_eui: "JOINEUI1" };
     if (object === "datalogger" && action === "get") return state.datalogger;
@@ -140,6 +157,7 @@ const isEpoch = (command: Record<string, unknown>) =>
 
 const commonHandlers = (options: { provisioner?: boolean } = {}) => [
   http.get(`${API}/account/me`, () => HttpResponse.json(me(options.provisioner))),
+  http.get(`${API}/firmware/releases`, () => HttpResponse.json([])),
   http.get(`${API}/context`, () => HttpResponse.json([context])),
   http.get(`${API}/sensor/driver`, () => HttpResponse.json([{ id: "sd1", name: "generic" }])),
   http.get(`${API}/datalogger/driver`, () =>
@@ -187,6 +205,19 @@ describe("DeviceConnectionPage", () => {
     expect(screen.getByText(/does not support Web Serial/i)).toBeInTheDocument();
   });
 
+  it("tells the user to refresh when the port won't open", async () => {
+    const board = boardPort(() => null, { failOpen: true });
+    installSerial([], board.port);
+    const user = userEvent.setup();
+    server.use(...commonHandlers());
+
+    renderWithProviders(<DeviceConnectionPage />);
+    await user.click(await screen.findByRole("button", { name: "Connect board" }));
+
+    expect(await screen.findByText(/refresh the page and connect again/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh page" })).toBeInTheDocument();
+  });
+
   it("shows a board in update mode and offers to start its app", async () => {
     const board = boardPort(bootloaderBoard());
     installSerial([], board.port);
@@ -197,7 +228,7 @@ describe("DeviceConnectionPage", () => {
     await connect(user);
 
     expect(screen.getByText("Board is in update mode")).toBeInTheDocument();
-    expect(screen.getByText("Installed")).toBeInTheDocument();
+    expect(screen.getByText("Installed (1.15.0)")).toBeInTheDocument();
     // The console offers bootloader commands, not the app's.
     expect(screen.getByRole("button", { name: "bootloader info" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "device get" })).not.toBeInTheDocument();
@@ -208,6 +239,186 @@ describe("DeviceConnectionPage", () => {
     );
   });
 
+  it("installs firmware from update mode and shows its progress", async () => {
+    const respond = bootloaderBoard(false);
+    const board = boardPort(respond);
+    installSerial([], board.port);
+    const user = userEvent.setup();
+    server.use(...commonHandlers());
+
+    renderWithProviders(<DeviceConnectionPage />);
+    await connect(user);
+    const file = new File([signedImage("2.0.0", 1300)], "rriv-2.0.0.bin");
+    await user.upload(screen.getByLabelText(/signed image file/), file);
+    expect(await screen.findByText("2.0.0")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Install 2.0.0" }));
+    await user.click(screen.getByRole("button", { name: "Click again to install" }));
+    expect(await screen.findByText(/Starting the new firmware/)).toBeInTheDocument();
+    expect(respond.received).toHaveLength(1812);
+    expect(board.written.at(-1)).toEqual({ object: "bootloader", action: "boot" });
+  });
+
+  it("installs the latest release, downloaded through rriv-api", async () => {
+    const respond = bootloaderBoard(true);
+    const board = boardPort(respond);
+    installSerial([], board.port);
+    const user = userEvent.setup();
+    const release = (version: string, prerelease = false) => ({
+      version,
+      name: version,
+      publishedAt: "2026-10-23T12:00:00Z",
+      prerelease,
+      notes: "",
+      bootloaderVersion: "0.4.1",
+      minBootloader: null,
+      size: 1812,
+    });
+    server.use(
+      // Ahead of commonHandlers' empty release list: the first match wins.
+      http.get(`${API}/firmware/releases`, () =>
+        HttpResponse.json([release("v2.2.0-beta.1", true), release("v2.1.0"), release("1.15.0")]),
+      ),
+      http.get(`${API}/firmware/releases/v2.1.0/image`, () =>
+        HttpResponse.arrayBuffer(signedImage("v2.1.0", 1300).buffer as ArrayBuffer, {
+          headers: { "content-type": "application/octet-stream" },
+        }),
+      ),
+      ...commonHandlers(),
+    );
+
+    renderWithProviders(<DeviceConnectionPage />);
+    await connect(user);
+    const picker = await screen.findByRole("combobox");
+    expect(picker).toHaveValue("v2.1.0");
+    expect(screen.getByRole("option", { name: "1.15.0 (installed)" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "v2.2.0-beta.1 (pre-release)" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Install v2.1.0" }));
+    await user.click(screen.getByRole("button", { name: "Click again to install" }));
+    expect(await screen.findByText(/Starting the new firmware/)).toBeInTheDocument();
+    expect(respond.received).toHaveLength(1812);
+  });
+
+  it("marks releases that need a newer bootloader than the board's", async () => {
+    const board = boardPort(bootloaderBoard(true));
+    installSerial([], board.port);
+    const user = userEvent.setup();
+    const asked: (string | null)[] = [];
+    const release = (version: string, minBootloader: string | null, compatible: boolean) => ({
+      version,
+      name: version,
+      publishedAt: "2026-10-23T12:00:00Z",
+      prerelease: false,
+      notes: "",
+      bootloaderVersion: "1.1.0",
+      minBootloader,
+      compatible,
+      size: 1812,
+    });
+    server.use(
+      http.get(`${API}/firmware/releases`, ({ request }) => {
+        asked.push(new URL(request.url).searchParams.get("bootloader"));
+        return HttpResponse.json([release("v2.2.0", "1.1.0", false), release("v2.1.0", "0.3.0", true)]);
+      }),
+      ...commonHandlers(),
+    );
+
+    renderWithProviders(<DeviceConnectionPage />);
+    await connect(user);
+    const picker = await screen.findByRole("combobox");
+    // The board's bootloader (0.3.0, from `info`) goes to rriv-api.
+    expect(asked).toContain("0.3.0");
+    // The newest release it can take is picked; the other is shown, disabled.
+    expect(picker).toHaveValue("v2.1.0");
+    expect(screen.getByRole("option", { name: "v2.2.0 (needs bootloader 1.1.0)" })).toBeDisabled();
+    expect(screen.getByText("0.3.0 or newer")).toBeInTheDocument();
+  });
+
+  it("records an install in the device's firmware history, with a retry", async () => {
+    const respond = bootloaderBoard(false);
+    const loader = boardPort(respond);
+    const serial = installSerial([], loader.port);
+    const user = userEvent.setup();
+    const recorded = vi.fn();
+    let fail = true;
+    server.use(
+      ...commonHandlers(),
+      http.get(`${API}/device`, () => HttpResponse.json([device])),
+      http.post(`${API}/device/firmware/history`, async ({ request }) => {
+        recorded(await request.json());
+        if (fail) return HttpResponse.json({ message: "database unavailable" }, { status: 500 });
+        return new HttpResponse(null, { status: 201 });
+      }),
+    );
+
+    renderWithProviders(<DeviceConnectionPage />);
+    await connect(user);
+    await user.upload(
+      screen.getByLabelText(/signed image file/),
+      new File([signedImage("2.0.0", 1300)], "rriv-2.0.0.bin"),
+    );
+    await user.click(await screen.findByRole("button", { name: "Install 2.0.0" }));
+    await user.click(screen.getByRole("button", { name: "Click again to install" }));
+    expect(await screen.findByText(/Starting the new firmware/)).toBeInTheDocument();
+
+    // The bootloader starts the app: the port drops and the app comes back.
+    await act(async () => {
+      loader.unplug();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    const app = makeBoard();
+    await act(async () => serial.fire("connect", app.port));
+
+    expect(await screen.findByText(/recording it in the device's firmware history failed/)).toBeInTheDocument();
+    expect(recorded).toHaveBeenCalledWith({
+      deviceId: "d1",
+      contextId: "c1",
+      version: "2.0.0",
+      installedAt: expect.any(String),
+    });
+
+    fail = false;
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("Recorded in the device's firmware history.")).toBeInTheDocument();
+    expect(recorded).toHaveBeenCalledTimes(2);
+  });
+
+  it("explains a start-up that keeps stopping, and starts the app anyway", async () => {
+    const board = boardPort(
+      bootloaderBoard(true, { startupLoop: { stopped_at: "i2c_scan", unfinished: 3 } }),
+    );
+    installSerial([], board.port);
+    const user = userEvent.setup();
+    server.use(...commonHandlers());
+
+    renderWithProviders(<DeviceConnectionPage />);
+    await connect(user);
+
+    expect(await screen.findByText(/start-up keeps stopping at/)).toHaveTextContent(
+      "i2c_scan (3 start-ups in a row didn't finish)",
+    );
+    await user.click(screen.getByRole("button", { name: "Start the app anyway" }));
+    await waitFor(() =>
+      expect(board.written).toContainEqual({ object: "bootloader", action: "boot" }),
+    );
+  });
+
+  it("refuses a file that isn't a signed image", async () => {
+    installSerial([], boardPort(bootloaderBoard(false)).port);
+    const user = userEvent.setup();
+    server.use(...commonHandlers());
+
+    renderWithProviders(<DeviceConnectionPage />);
+    await connect(user);
+    await user.upload(
+      screen.getByLabelText(/signed image file/),
+      new File([new Uint8Array(2000)], "app.bin"),
+    );
+    expect(await screen.findByText(/isn't a signed RRIV firmware image/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Install firmware" })).toBeDisabled();
+  });
+
   it("says when a board in update mode has no app to start", async () => {
     installSerial([], boardPort(bootloaderBoard(false)).port);
     const user = userEvent.setup();
@@ -216,7 +427,7 @@ describe("DeviceConnectionPage", () => {
     renderWithProviders(<DeviceConnectionPage />);
     await connect(user);
 
-    expect(screen.getByText("Not installed")).toBeInTheDocument();
+    expect(screen.getByText("Not installed (no firmware)")).toBeInTheDocument();
     expect(screen.getByText(/No valid firmware is installed/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Start the app" })).not.toBeInTheDocument();
   });
@@ -242,6 +453,136 @@ describe("DeviceConnectionPage", () => {
     expect(
       board.written.filter((command) => command.object === "device" && command.action === "get"),
     ).toHaveLength(1);
+  });
+
+  it("shows where the last start-up stopped", async () => {
+    const board = makeBoard();
+    board.state.startup = {
+      previous_completed: false,
+      stopped_at: "i2c2",
+      failed_startups: 2,
+      reset_cause: "watchdog",
+      traced: false,
+    };
+    installSerial([], board.port);
+    const user = userEvent.setup();
+    const logged = vi.fn();
+    server.use(
+      ...commonHandlers(),
+      http.get(`${API}/device`, () => HttpResponse.json([device])),
+      http.post(`${API}/device/log`, async ({ request }) => {
+        logged(await request.json());
+        return new HttpResponse(null, { status: 201 });
+      }),
+    );
+
+    renderWithProviders(<DeviceConnectionPage />);
+    await connect(user);
+
+    // Noted in the device's log in RRIV, for support.
+    await waitFor(() =>
+      expect(logged).toHaveBeenCalledWith({
+        identifier: "SN-1",
+        log: "web: start-up stopped at i2c2 (watchdog), 3 unfinished in a row",
+      }),
+    );
+    expect(await screen.findByText(/The last start-up didn't finish/)).toHaveTextContent(
+      "stopped at i2c2 and the board was reset (watchdog (the board stopped responding)). 2 start-ups in a row didn't finish before this one.",
+    );
+    await user.click(screen.getByRole("button", { name: "Trace the next start-up" }));
+    await waitFor(() =>
+      expect(board.written).toContainEqual({ object: "board", action: "diagnostic" }),
+    );
+  });
+
+  it("says when the firmware keeps no start-up log", async () => {
+    installSerial([], makeBoard().port);
+    const user = userEvent.setup();
+    server.use(...commonHandlers(), http.get(`${API}/device`, () => HttpResponse.json([device])));
+
+    renderWithProviders(<DeviceConnectionPage />);
+    await connect(user);
+
+    expect(await screen.findByText(/doesn't keep a start-up log/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Trace the next start-up" })).toBeDisabled();
+  });
+
+  it("resets the datalogger settings and records the defaults once the board is back", async () => {
+    const board = makeBoard();
+    const serial = installSerial([], board.port);
+    const user = userEvent.setup();
+    const synced = vi.fn();
+    server.use(
+      ...commonHandlers(),
+      http.get(`${API}/device`, () => HttpResponse.json([device])),
+      http.post(`${API}/datalogger/config`, async ({ request }) => {
+        synced(await request.json());
+        return new HttpResponse(null, { status: 201 });
+      }),
+    );
+
+    renderWithProviders(<DeviceConnectionPage />);
+    await connect(user);
+    await user.click(await screen.findByRole("tab", { name: "Datalogger" }));
+    await user.click(await screen.findByRole("button", { name: "Reset settings" }));
+    await user.click(screen.getByRole("button", { name: "Click again to reset" }));
+
+    expect(await screen.findByText(/Resetting the datalogger settings/)).toBeInTheDocument();
+    expect(synced).not.toHaveBeenCalled();
+
+    // The board restarts with its defaults.
+    const restarted = makeBoard();
+    restarted.state.datalogger = { site_name: "site", logger_name: "MyLogger", sleep_interval: 15, mode: "interactive" };
+    restarted.state.sensors.clear();
+    await act(async () => serial.fire("connect", restarted.port));
+
+    expect(
+      await screen.findByText("Datalogger settings reset to their defaults and recorded in RRIV."),
+    ).toBeInTheDocument();
+    expect(synced).toHaveBeenCalledTimes(1);
+    expect(synced.mock.calls[0]![0]).toMatchObject({ deviceId: "d1", contextId: "c1" });
+  });
+
+  it("factory-resets a provisioner's board and leaves the device bound", async () => {
+    const board = makeBoard();
+    installSerial([], board.port);
+    const user = userEvent.setup();
+    const unbound = vi.fn();
+    server.use(
+      ...commonHandlers({ provisioner: true }),
+      http.get(`${API}/device`, () => HttpResponse.json([device])),
+      http.post(`${API}/device/SN-1/unbind`, () => {
+        unbound();
+        return HttpResponse.json(device);
+      }),
+    );
+
+    renderWithProviders(<DeviceConnectionPage />);
+    await connect(user);
+    await user.click(await screen.findByRole("button", { name: "Factory reset" }));
+    await user.click(screen.getByRole("button", { name: "Click again to wipe the board" }));
+
+    await waitFor(() =>
+      expect(board.written).toContainEqual({ object: "device", action: "reset", serial_number: "SN-1" }),
+    );
+    expect(
+      await screen.findByText(
+        "Board wiped. Device SN-1 is still in RRIV; provision the board to give it back serial number SN-1.",
+      ),
+    ).toBeInTheDocument();
+    expect(unbound).not.toHaveBeenCalled();
+  });
+
+  it("offers factory reset only to provisioners", async () => {
+    installSerial([], makeBoard().port);
+    const user = userEvent.setup();
+    server.use(...commonHandlers(), http.get(`${API}/device`, () => HttpResponse.json([device])));
+
+    renderWithProviders(<DeviceConnectionPage />);
+    await connect(user);
+
+    expect(await screen.findByRole("tab", { name: "Overview" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Factory reset" })).not.toBeInTheDocument();
   });
 
   it("forwards a message out of the board's USART from the Overview tab", async () => {

@@ -4,6 +4,9 @@ import { BootloaderPanel } from "@/components/connect/BootloaderPanel";
 import { ConnectPanel } from "@/components/connect/ConnectPanel";
 import { ConsoleTab } from "@/components/connect/ConsoleTab";
 import { DataloggerTab } from "@/components/connect/DataloggerTab";
+import { FirmwareProgressCard, FirmwareTab } from "@/components/connect/FirmwareInstall";
+import { DiagnosticsButton } from "@/components/connect/DiagnosticsButton";
+import { ResetNoticeCard } from "@/components/connect/Resets";
 import { LiveTab } from "@/components/connect/LiveTab";
 import { OverviewTab } from "@/components/connect/OverviewTab";
 import { SensorsTab } from "@/components/connect/SensorsTab";
@@ -20,7 +23,7 @@ import { useBoardLink } from "@/components/connect/useBoardLink";
 import { EmptyState } from "@/components/EmptyState";
 import { isWebSerialSupported, useSerialConnection } from "@/serial";
 
-type Tab = "overview" | "sensors" | "datalogger" | "live" | "console";
+type Tab = "overview" | "sensors" | "datalogger" | "live" | "console" | "firmware";
 
 export function DeviceConnectionPage() {
   if (!isWebSerialSupported()) {
@@ -63,6 +66,8 @@ function DeviceConnection() {
   if (serial.status === "bootloader" && client) {
     return (
       <Page>
+        <FirmwareProgressCard serial={serial} />
+        <ResetNoticeCard link={link} />
         <BootloaderPanel serial={serial} />
         <ConsoleTab
           client={client}
@@ -77,7 +82,9 @@ function DeviceConnection() {
   if (serial.status !== "connected" || !client) {
     return (
       <Page>
-        <ConnectPanel serial={serial} />
+        <FirmwareProgressCard serial={serial} />
+        <ResetNoticeCard link={link} />
+        <ConnectPanel serial={serial} link={link} />
       </Page>
     );
   }
@@ -97,11 +104,14 @@ function DeviceConnection() {
       badge: serial.watching ? <StatusDot tone="brand" /> : undefined,
     },
     { id: "console" as const, label: "Console" },
+    { id: "firmware" as const, label: "Firmware" },
   ];
 
   return (
     <Page>
       <BoardHeader serial={serial} link={link} />
+      <FirmwareProgressCard serial={serial} history={link.firmwareHistory} />
+      <ResetNoticeCard link={link} />
 
       {serial.restart ? (
         <Callout
@@ -158,12 +168,14 @@ function DeviceConnection() {
             {tab === "sensors" ? <SensorsTab client={client} link={link} locked={locked} /> : null}
             {tab === "datalogger" ? <DataloggerTab serial={serial} link={link} locked={locked} /> : null}
             {tab === "live" ? <LiveTab serial={serial} /> : null}
+            {tab === "firmware" ? <FirmwareTab serial={serial} locked={locked} /> : null}
             {tab === "console" ? (
               <ConsoleTab
                 client={client}
                 transcript={serial.transcript}
                 onClear={serial.clearTranscript}
                 locked={locked}
+                extraAction={<DiagnosticsButton serial={serial} link={link} />}
               />
             ) : null}
           </TabPanel>

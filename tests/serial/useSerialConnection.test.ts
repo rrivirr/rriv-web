@@ -1,12 +1,19 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { type SerialPort, type WatchFrame, type WatchSink, useSerialConnection } from "@/serial";
+import {
+  type SerialPort,
+  type WatchFrame,
+  type WatchSink,
+  parseFirmwareImage,
+  useSerialConnection,
+} from "@/serial";
 import { hookWrapper } from "../helpers/render";
 import {
   boardPort,
   bootloaderBoard,
   defaultBoard,
   installSerial,
+  signedImage,
   uninstallSerial,
 } from "./fakeBoard";
 
@@ -27,6 +34,22 @@ async function connectHook() {
 afterEach(uninstallSerial);
 
 describe("useSerialConnection", () => {
+  it("explains the disconnect after a command that restarts the board", async () => {
+    const { result, board } = await connectHook();
+    await act(() =>
+      result.current.sendRestarting(
+        { object: "datalogger", action: "reset" },
+        "Resetting the datalogger settings to their defaults.",
+      ),
+    );
+    await act(async () => {
+      board.unplug();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await waitFor(() => expect(result.current.status).toBe("lost"));
+    expect(result.current.error).toBe("Resetting the datalogger settings to their defaults.");
+  });
+
   it("reports support when Web Serial is absent", () => {
     const { result } = renderConnection();
     expect(result.current.supported).toBe(false);
@@ -219,6 +242,67 @@ describe("useSerialConnection", () => {
     expect(result.current.restart).toMatchObject({ kind: "crash", message: "stack overflow" });
   });
 
+  it("waits out a traced start-up it asked for, showing its steps", async () => {
+    const { result, board, serial } = await connectHook();
+    await act(() =>
+      result.current.sendRestarting({ object: "board", action: "diagnostic" }, "Tracing.", {
+        traced: true,
+      }),
+    );
+    await act(async () => {
+      board.unplug();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await waitFor(() => expect(result.current.status).toBe("lost"));
+
+    let booted = false;
+    const tracing = boardPort((command) => (booted ? defaultBoard(command) : null));
+    await act(async () => serial.fire("connect", tracing.port as SerialPort));
+    await waitFor(() => expect(result.current.waitingForBoot).toBe(true));
+    await act(async () => {
+      tracing.push('{"startup":"i2c1"}');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await waitFor(() => expect(result.current.startupStep).toBe("i2c1"));
+    // Nothing is sent to a board that is still starting.
+    expect(tracing.written).toEqual([]);
+
+    await act(async () => {
+      booted = true;
+      tracing.push('{"startup":"datalogger_setup","done":true}');
+      tracing.push('{"status":"datalogger-ready"}');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await waitFor(() => expect(result.current.status).toBe("connected"));
+    expect(result.current.startupStep).toBeNull();
+  });
+
+  it("waits for a board it finds in the middle of a traced start-up", async () => {
+    // e.g. the page was refreshed during a trace: no reply until it's started.
+    let booted = false;
+    const tracing = boardPort((command) => (booted ? defaultBoard(command) : null));
+    installSerial([tracing.port]);
+    const { result } = renderConnection();
+    await waitFor(() => expect(result.current.ports).toHaveLength(1));
+    let connecting!: Promise<void>;
+    await act(async () => {
+      connecting = result.current.connect(tracing.port);
+    });
+    await act(async () => {
+      tracing.push('{"startup":"external_adc"}');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    // The first read times out (5 s); the trace line says to keep waiting.
+    await waitFor(() => expect(result.current.waitingForBoot).toBe(true), { timeout: 8000 });
+    await act(async () => {
+      booted = true;
+      tracing.push('{"status":"datalogger-ready"}');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await act(() => connecting);
+    expect(result.current.status).toBe("connected");
+  }, 20_000);
+
   it("recognises a board in update mode and starts its app", async () => {
     const board = boardPort(bootloaderBoard());
     const serial = installSerial([board.port]);
@@ -229,7 +313,13 @@ describe("useSerialConnection", () => {
     expect(result.current.status).toBe("bootloader");
     expect(result.current.error).toBeNull();
     expect(result.current.info).toBeNull();
-    expect(result.current.bootloader).toEqual({ version: "0.1.0", appValid: true });
+    expect(result.current.bootloader).toEqual({
+      version: "0.3.0",
+      appValid: true,
+      appVersion: "1.15.0",
+      appError: null,
+      startupLoop: null,
+    });
     expect(result.current.client).not.toBeNull();
 
     await act(() => result.current.startApp());
@@ -247,5 +337,150 @@ describe("useSerialConnection", () => {
     await act(async () => serial.fire("connect", app.port as SerialPort));
     await waitFor(() => expect(result.current.status).toBe("connected"));
     expect(result.current.info?.serialNumber).toBe("SN-1");
+  });
+
+  it("installs firmware across the restarts into the bootloader and back", async () => {
+    const { result, board, serial } = await connectHook();
+    const image = parseFirmwareImage(signedImage("2.0.0", 1300));
+
+    await act(() => result.current.installFirmware(image));
+    expect(board.written).toContainEqual({ object: "board", action: "bootloader" });
+    expect(result.current.firmware).toEqual({ stage: "restarting", version: "2.0.0" });
+
+    // The app resets into the bootloader...
+    await act(async () => {
+      board.unplug();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await waitFor(() => expect(result.current.status).toBe("lost"));
+    expect(result.current.error).toMatch(/Restarting into update mode/);
+
+    // ...which comes back, takes the image and is told to start it.
+    const respond = bootloaderBoard();
+    const loader = boardPort(respond);
+    await act(async () => serial.fire("connect", loader.port as SerialPort));
+    await waitFor(() => expect(result.current.firmware?.stage).toBe("starting"));
+    expect(Uint8Array.from(respond.received)).toEqual(image.bytes);
+    expect(loader.written.at(-1)).toEqual({ object: "bootloader", action: "boot" });
+
+    await act(async () => {
+      loader.unplug();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await waitFor(() => expect(result.current.status).toBe("lost"));
+    const app = boardPort(defaultBoard);
+    await act(async () => serial.fire("connect", app.port as SerialPort));
+    await waitFor(() => expect(result.current.status).toBe("connected"));
+    expect(result.current.firmware).toEqual({
+      stage: "done",
+      version: "2.0.0",
+      installedAt: expect.any(String),
+    });
+  });
+
+  it("doesn't write a release that needs a newer bootloader, and goes back to the app", async () => {
+    const { result, board, serial } = await connectHook();
+    const image = { ...parseFirmwareImage(signedImage("2.0.0", 1300)), minBootloader: "1.0.0" };
+
+    await act(() => result.current.installFirmware(image));
+    await act(async () => {
+      board.unplug();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await waitFor(() => expect(result.current.status).toBe("lost"));
+
+    // The bootloader (0.3.0) is too old: nothing is written, and it's told to
+    // start the app it already has.
+    const respond = bootloaderBoard();
+    const loader = boardPort(respond);
+    await act(async () => serial.fire("connect", loader.port as SerialPort));
+    await waitFor(() => expect(result.current.firmware?.stage).toBe("error"));
+    expect(result.current.firmware).toMatchObject({
+      message: expect.stringMatching(/^2\.0\.0 needs bootloader 1\.0\.0 or newer; this board has 0\.3\.0\. Its firmware wasn't changed\./),
+    });
+    expect(loader.written.map((command) => command.action)).not.toContain("begin");
+    expect(respond.received).toHaveLength(0);
+    expect(loader.written.at(-1)).toEqual({ object: "bootloader", action: "boot" });
+  });
+
+  it("installs a release whose minimum the bootloader meets", async () => {
+    const respond = bootloaderBoard(true);
+    const loader = boardPort(respond);
+    installSerial([loader.port]);
+    const { result } = renderConnection();
+    await waitFor(() => expect(result.current.ports).toHaveLength(1));
+    await act(() => result.current.connect(loader.port));
+
+    const image = { ...parseFirmwareImage(signedImage("2.0.0", 700)), minBootloader: "0.3.0" };
+    await act(() => result.current.installFirmware(image));
+    expect(result.current.firmware?.stage).toBe("starting");
+    expect(Uint8Array.from(respond.received)).toEqual(image.bytes);
+  });
+
+  it("reports an image the bootloader refuses, and stays in update mode", async () => {
+    const respond = bootloaderBoard(false, { refuse: "hash_mismatch" });
+    const loader = boardPort(respond);
+    installSerial([loader.port]);
+    const { result } = renderConnection();
+    await waitFor(() => expect(result.current.ports).toHaveLength(1));
+    await act(() => result.current.connect(loader.port));
+    expect(result.current.status).toBe("bootloader");
+
+    await act(() => result.current.installFirmware(parseFirmwareImage(signedImage("2.0.0", 700))));
+    expect(result.current.firmware).toMatchObject({
+      stage: "error",
+      message: expect.stringMatching(/image refused: hash_mismatch/),
+    });
+    expect(result.current.status).toBe("bootloader");
+    expect(loader.written).not.toContainEqual({ object: "bootloader", action: "boot" });
+  });
+
+  it("refuses a damaged image without restarting the board", async () => {
+    const { result, board } = await connectHook();
+    const bytes = signedImage("2.0.0", 700);
+    bytes[900]! ^= 0xff;
+
+    await act(() => result.current.installFirmware(parseFirmwareImage(bytes)));
+
+    expect(result.current.firmware).toMatchObject({
+      stage: "error",
+      message: expect.stringMatching(/damaged/),
+    });
+    expect(board.written).not.toContainEqual({ object: "board", action: "bootloader" });
+    expect(result.current.status).toBe("connected");
+  });
+
+  it("refuses a damaged image in update mode before sending anything", async () => {
+    const respond = bootloaderBoard(true);
+    const loader = boardPort(respond);
+    installSerial([loader.port]);
+    const { result } = renderConnection();
+    await waitFor(() => expect(result.current.ports).toHaveLength(1));
+    await act(() => result.current.connect(loader.port));
+    const bytes = signedImage("2.0.0", 700);
+    bytes[900]! ^= 0xff;
+
+    await act(() => result.current.installFirmware(parseFirmwareImage(bytes)));
+
+    expect(result.current.firmware).toMatchObject({ stage: "error" });
+    expect(loader.written).not.toContainEqual(expect.objectContaining({ action: "begin" }));
+    expect(result.current.status).toBe("bootloader");
+  });
+
+  it("explains an image signed for another bootloader, refused before anything is erased", async () => {
+    const respond = bootloaderBoard(true, { refuseHeader: "bad_signature" });
+    const loader = boardPort(respond);
+    installSerial([loader.port]);
+    const { result } = renderConnection();
+    await waitFor(() => expect(result.current.ports).toHaveLength(1));
+    await act(() => result.current.connect(loader.port));
+
+    await act(() => result.current.installFirmware(parseFirmwareImage(signedImage("2.0.0", 700))));
+    expect(result.current.firmware).toMatchObject({
+      stage: "error",
+      message: expect.stringMatching(/^Image not signed for this board\.$/),
+    });
+    expect(respond.received).toHaveLength(0);
+    expect(loader.written.filter((command) => command.action === "write")).toHaveLength(1);
   });
 });

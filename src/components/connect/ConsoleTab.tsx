@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { SectionCard } from "@/components/SectionCard";
 import { type SerialClient, type TranscriptEntry } from "@/serial";
 import { parseJsonObject } from "./ConfigForm";
@@ -26,6 +26,7 @@ export function ConsoleTab({
   onClear,
   locked,
   inBootloader = false,
+  extraAction,
 }: {
   client: SerialClient;
   transcript: TranscriptEntry[];
@@ -33,6 +34,8 @@ export function ConsoleTab({
   locked: boolean;
   /** The board is in update mode: offer the bootloader's commands. */
   inBootloader?: boolean;
+  /** Shown next to Clear (e.g. Download diagnostics). */
+  extraAction?: ReactNode;
 }) {
   const task = useTask();
   const [command, setCommand] = useState("");
@@ -62,9 +65,12 @@ export function ConsoleTab({
         title="Serial console"
         subtitle="Everything sent to and received from the board this session."
         action={
-          <button type="button" className={button} disabled={!transcript.length} onClick={onClear}>
-            Clear
-          </button>
+          <div className="flex gap-2">
+            {extraAction}
+            <button type="button" className={button} disabled={!transcript.length} onClick={onClear}>
+              Clear
+            </button>
+          </div>
         }
       >
         <div className="space-y-4">

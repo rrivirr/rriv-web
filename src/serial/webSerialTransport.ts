@@ -4,6 +4,9 @@ import type { SerialTransport } from "./transport";
 /** RRIV boards speak at a fixed 115200 8N1, no flow control. */
 export const DEFAULT_BAUD_RATE = 115200;
 
+/** How long close() waits for the read pipe to let go of the port. */
+const PIPE_CLOSE_MS = 1000;
+
 /**
  * {@link SerialTransport} backed by the Web Serial API.
  *
@@ -17,6 +20,9 @@ export class WebSerialTransport implements SerialTransport {
   private readonly port: SerialPort;
   private writer: WritableStreamDefaultWriter<Uint8Array> | null = null;
   private reader: ReadableStreamDefaultReader<string> | null = null;
+  /** Stops the pipe from the port into the decoder, releasing `port.readable`. */
+  private pipeAbort: AbortController | null = null;
+  private pipe: Promise<void> | null = null;
   private opened = false;
 
   constructor(port: SerialPort, label = "RRIV device") {
@@ -26,7 +32,15 @@ export class WebSerialTransport implements SerialTransport {
 
   async open(): Promise<void> {
     if (this.opened) return;
-    await this.port.open({ baudRate: DEFAULT_BAUD_RATE });
+    try {
+      await this.port.open({ baudRate: DEFAULT_BAUD_RATE });
+    } catch (cause) {
+      // Left open by an earlier connection that didn't close cleanly: close
+      // it and try once more.
+      if (!(cause instanceof DOMException && cause.name === "InvalidStateError")) throw cause;
+      await this.port.close();
+      await this.port.open({ baudRate: DEFAULT_BAUD_RATE });
+    }
     if (!this.port.writable) {
       await this.port.close().catch(() => undefined);
       throw new Error("Serial port has no writable stream.");
@@ -43,9 +57,11 @@ export class WebSerialTransport implements SerialTransport {
   async *lines(): AsyncGenerator<string> {
     if (!this.port.readable) throw new Error("Serial port has no readable stream.");
     const decoder = new TextDecoderStream();
-    // The pipe settles when the port closes; we never await it during close()
-    // (a torn-down source can leave it pending).
-    void this.port.readable.pipeTo(decoder.writable).catch(() => undefined);
+    const abort = new AbortController();
+    this.pipeAbort = abort;
+    this.pipe = this.port.readable
+      .pipeTo(decoder.writable, { signal: abort.signal })
+      .catch(() => undefined);
     const reader = decoder.readable.getReader();
     this.reader = reader;
 
@@ -72,13 +88,25 @@ export class WebSerialTransport implements SerialTransport {
     }
   }
 
+  /**
+   * Close the port. The browser refuses to close a port whose streams are
+   * still locked, and the port then stays open until the page reloads, so the
+   * read pipe is stopped and given time to unlock `port.readable` first.
+   */
   async close(): Promise<void> {
     this.opened = false;
+    this.pipeAbort?.abort();
     try {
       await this.reader?.cancel();
     } catch {
       // reader may already be done
     }
+    if (this.pipe) {
+      // A torn-down source can leave the pipe pending; don't wait forever.
+      await Promise.race([this.pipe, new Promise((resolve) => setTimeout(resolve, PIPE_CLOSE_MS))]);
+    }
+    this.pipe = null;
+    this.pipeAbort = null;
     try {
       this.writer?.releaseLock();
     } catch {

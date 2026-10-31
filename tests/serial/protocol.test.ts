@@ -22,6 +22,19 @@ function makeClient(timeoutMs = 200) {
 }
 
 describe("SerialClient", () => {
+  it("skips a traced start-up's progress lines while waiting for a reply", async () => {
+    const { transport, client } = makeClient();
+    const promise = readDevice(client);
+    await deliver(transport, [
+      ECHO_DEVICE,
+      '{"startup":"i2c1"}',
+      '{"startup":"i2c1","done":true}',
+      '{"serial_number":"SN-1","uid":"U-1"}',
+    ]);
+    await expect(promise).resolves.toMatchObject({ serialNumber: "SN-1" });
+    await client.stop();
+  });
+
   it("skips the command echo and parses the response", async () => {
     const { transport, client } = makeClient();
     const promise = readDevice(client);
@@ -214,5 +227,17 @@ describe("parseBoardStatus", () => {
     expect(parseBoardStatus('{"status":"error","message":"x"}')).toBeNull();
     expect(parseBoardStatus("1,2,3")).toBeNull();
     expect(parseBoardStatus('{"status":"panic","message":"torn')).toBeNull();
+  });
+});
+
+describe("parseBoardStatus", () => {
+  it("recognises start-up trace lines, but not the start-up report", () => {
+    expect(parseBoardStatus('{"startup":"usb"}')).toEqual({ kind: "startup", step: "usb", done: false });
+    expect(parseBoardStatus('{"startup":"usb","done":true}')).toEqual({
+      kind: "startup",
+      step: "usb",
+      done: true,
+    });
+    expect(parseBoardStatus('{"startup":{"previous_completed":true}}')).toBeNull();
   });
 });

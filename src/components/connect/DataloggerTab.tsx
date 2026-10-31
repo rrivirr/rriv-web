@@ -10,6 +10,7 @@ import {
 } from "@/serial";
 import { ConfigForm } from "./ConfigForm";
 import { reportApply, syncFeedback } from "./syncFeedback";
+import { ResetSettingsButton } from "./Resets";
 import type { BoardLink } from "./useBoardLink";
 import { ConfirmButton, FeedbackCallout, button, useTask } from "./ui";
 
@@ -131,6 +132,9 @@ export function DataloggerTab({
               The board didn't report its datalogger settings. Try Refresh.
             </p>
           )}
+          <div className="border-t border-border pt-4">
+            <ResetSettingsButton link={link} disabled={disabled} />
+          </div>
         </div>
       </SectionCard>
     </>

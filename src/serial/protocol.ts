@@ -56,7 +56,21 @@ export class SerialCrashError extends SerialError {
 /** The board rebooted (`datalogger-ready`) mid-command. */
 class SerialRestartError extends SerialError {}
 
-export type BoardStatus = { kind: "ready" } | { kind: "panic"; message: string };
+export type BoardStatus =
+  | { kind: "ready" }
+  | { kind: "panic"; message: string }
+  /** A traced start-up (`board diagnostic`) reaching or finishing a step. */
+  | { kind: "startup"; step: string; done: boolean };
+
+/**
+ * `{"startup":"<step>"}` / `{"startup":"<step>","done":true}` from a traced
+ * start-up. (The reply to `board get startup` has an object under `startup`.)
+ */
+const startupTraceLine = (record: Record<string, unknown>): BoardStatus | null =>
+  typeof record.startup === "string" &&
+  Object.keys(record).every((key) => key === "startup" || key === "done")
+    ? { kind: "startup", step: record.startup, done: record.done === true }
+    : null;
 
 /**
  * Recognise the board's unsolicited status lines: `{"status":"datalogger-ready"}`
@@ -64,10 +78,12 @@ export type BoardStatus = { kind: "ready" } | { kind: "panic"; message: string }
  */
 export function parseBoardStatus(line: string): BoardStatus | null {
   const trimmed = line.trim();
-  if (!trimmed.startsWith("{") || !trimmed.includes("status")) return null;
+  if (!trimmed.startsWith("{") || !/status|startup/.test(trimmed)) return null;
   try {
     const parsed = JSON.parse(trimmed) as unknown;
     if (!isRecord(parsed)) return null;
+    const trace = startupTraceLine(parsed);
+    if (trace) return trace;
     if (parsed.status === "datalogger-ready") return { kind: "ready" };
     if (typeof parsed.status === "string" && parsed.status.includes("panic")) {
       return {
@@ -318,6 +334,8 @@ export class SerialClient {
         continue;
       }
       if (!isRecord(response)) continue;
+      // A traced start-up's progress is status, not an answer to anything.
+      if (startupTraceLine(response)) continue;
 
       const status = response.error || response.status;
       if (String(status).includes("panic")) {

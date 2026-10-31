@@ -5,6 +5,8 @@ import { SectionCard } from "@/components/SectionCard";
 import { formatRelative } from "@/lib/format";
 import { type SerialConnection, serialSend, setMode } from "@/serial";
 import type { BoardLink } from "./useBoardLink";
+import { FactoryResetCard } from "./Resets";
+import { StartupCard } from "./StartupCard";
 import { syncFeedback } from "./syncFeedback";
 import { Field, FeedbackCallout, button, input, label, useTask } from "./ui";
 
@@ -99,6 +101,8 @@ export function OverviewTab({
           </div>
         </div>
       </SectionCard>
+
+      <StartupCard serial={serial} link={link} locked={locked} />
 
       <SectionCard
         title="Serial out"
@@ -205,6 +209,8 @@ export function OverviewTab({
           <p className="text-sm text-fg-subtle">Loading this board's cloud record…</p>
         )}
       </SectionCard>
+
+      <FactoryResetCard link={link} locked={locked} />
     </>
   );
 }

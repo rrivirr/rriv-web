@@ -85,6 +85,26 @@ export async function apiFetch<T>(
   return payload as T;
 }
 
+/** `apiFetch` for a binary response (e.g. a firmware image). */
+export async function apiFetchBytes(
+  getToken: TokenProvider,
+  path: string,
+  init: RequestInit = {},
+): Promise<Uint8Array> {
+  const token = await getToken();
+  const headers = new Headers(init.headers);
+  headers.set("Accept", "application/octet-stream");
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  const response = await fetch(resolveUrl(path), { ...init, headers });
+  if (!response.ok) {
+    const payload = await readBody(response);
+    throw new ApiError(response.status, extractMessage(payload, response.status), payload);
+  }
+  return new Uint8Array(await response.arrayBuffer());
+}
+
 /**
  * Auth-aware API client. Reads the current token from the auth context at call
  * time — the idiomatic way for components and TanStack Query functions to talk
@@ -101,6 +121,8 @@ export function useApiClient() {
     () => ({
       get: <T>(path: string, init?: RequestInit) =>
         apiFetch<T>(getAccessToken, path, init),
+      getBytes: (path: string, init?: RequestInit) =>
+        apiFetchBytes(getAccessToken, path, init),
       post: <T>(path: string, body?: unknown, init?: RequestInit) =>
         apiFetch<T>(getAccessToken, path, {
           method: "POST",

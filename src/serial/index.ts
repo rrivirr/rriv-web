@@ -29,6 +29,7 @@ export {
   readBoardVersion,
   readBootloaderInfo,
   readDevice,
+  readStartupReport,
   readTelemeter,
   removeAllSensors,
   removeSensor,
@@ -41,6 +42,9 @@ export {
   setSerialNumber,
   startApp,
   unappliedChanges,
+  DATALOGGER_RESET,
+  STARTUP_TRACE,
+  deviceReset,
 } from "./commands";
 export type {
   BootloaderInfo,
@@ -48,6 +52,7 @@ export type {
   CalibrationPair,
   DeviceInfo,
   SensorSummary,
+  StartupReport,
   TelemeterInfo,
 } from "./commands";
 export {
@@ -76,8 +81,22 @@ export type {
   SerialPortInfo,
   SerialPortRequestOptions,
 } from "./webSerialApi";
+export {
+  BLOCK_SIZE,
+  IMAGE_HEADER_SIZE,
+  bootloaderTooOld,
+  crc32,
+  imageIntact,
+  installFirmware,
+  parseFirmwareImage,
+} from "./firmware";
+export type { FirmwareImage } from "./firmware";
+export { buildDiagnostics, diagnosticsFilename } from "./diagnostics";
+export type { Diagnostics } from "./diagnostics";
 export { useSerialConnection } from "./useSerialConnection";
 export type {
+  ErrorEntry,
+  FirmwareProgress,
   PortOption,
   RestartNotice,
   SerialConnection,

@@ -23,6 +23,12 @@ import {
   setClock,
   startApp as bootApp,
 } from ".";
+import {
+  type FirmwareImage,
+  bootloaderTooOld,
+  imageIntact,
+  installFirmware as installImage,
+} from "./firmware";
 
 /**
  * - `lost`: the board went away (unplugged or re-enumerated after a reboot)
@@ -32,10 +38,30 @@ import {
  */
 export type SerialStatus = "idle" | "connecting" | "connected" | "bootloader" | "lost" | "error";
 
+/** Where a firmware install is; it carries on across the board's restarts. */
+export type FirmwareProgress =
+  | { stage: "restarting"; version: string }
+  | { stage: "writing"; version: string; written: number; total: number }
+  | { stage: "checking"; version: string }
+  /** `installedAt`: when the bootloader accepted the image (ISO 8601). */
+  | { stage: "starting"; version: string; installedAt: string }
+  | { stage: "done"; version: string; installedAt: string }
+  | { stage: "error"; version: string; message: string };
+
 export interface PortOption {
   port: SerialPort;
   label: string;
 }
+
+/** An error or disconnect shown on the page, kept for diagnostics. */
+export interface ErrorEntry {
+  at: string;
+  status: SerialStatus;
+  message: string;
+}
+
+/** Errors kept for diagnostics (most recent last). */
+const MAX_ERRORS = 50;
 
 export interface TranscriptEntry {
   id: number;
@@ -55,6 +81,8 @@ export type RestartNotice =
 
 /** How long to wait for `datalogger-ready` after the board reappears (rrivctl: 7s + 13s). */
 const BOOT_WAIT_MS = 15_000;
+/** A traced start-up pauses a second around each of its 17 steps. */
+const TRACED_BOOT_WAIT_MS = 90_000;
 /** A crash this recent explains a dropped connection. */
 const CRASH_WINDOW_MS = 60_000;
 
@@ -91,12 +119,31 @@ export interface SerialConnection {
   connectedAt: number;
   /** True while waiting for a reappearing board to finish booting. */
   waitingForBoot: boolean;
+  /** The step a traced start-up last reported (`board diagnostic`), while it runs. */
+  startupStep: string | null;
+  /** Errors and disconnects shown during this page session, for diagnostics. */
+  errorHistory: ErrorEntry[];
   /** The board crashed or restarted during this session. */
   restart: RestartNotice | null;
   /** What the bootloader reported, while `status` is `bootloader`. */
   bootloader: BootloaderInfo | null;
   /** Leave update mode; the board reconnects running the app. */
   startApp: () => Promise<void>;
+  /**
+   * Send a command after which the board restarts (a reset, the start-up
+   * trace). `reason` explains the disconnect that follows; `traced` waits
+   * longer for the board to come back.
+   */
+  sendRestarting: (command: SerialRecord, reason: string, options?: { traced?: boolean }) => Promise<SerialRecord>;
+  /** The current (or last) firmware install. */
+  firmware: FirmwareProgress | null;
+  /**
+   * Install a signed image: restarts the board into the bootloader if it's
+   * running the app, writes the image, then starts it. Progress is in
+   * `firmware`.
+   */
+  installFirmware: (image: FirmwareImage) => Promise<void>;
+  dismissFirmware: () => void;
   dismissRestart: () => void;
   transcript: TranscriptEntry[];
   /** True while the board is streaming `watch` frames. */
@@ -134,6 +181,8 @@ export interface SerialConnection {
 const message = (cause: unknown, fallback: string) =>
   cause instanceof Error && cause.message ? cause.message : fallback;
 
+const STARTING_APP = "Starting the app. The board reconnects automatically.";
+
 const isJsonLine = (line: string) => line.trimStart().startsWith("{");
 
 /**
@@ -155,8 +204,11 @@ export function useSerialConnection(): SerialConnection {
   const [detailsRead, setDetailsRead] = useState(false);
   const [connectedAt, setConnectedAt] = useState(0);
   const [waitingForBoot, setWaitingForBoot] = useState(false);
+  const [startupStep, setStartupStep] = useState<string | null>(null);
+  const [errorHistory, setErrorHistory] = useState<ErrorEntry[]>([]);
   const [restart, setRestart] = useState<RestartNotice | null>(null);
   const [bootloader, setBootloader] = useState<BootloaderInfo | null>(null);
+  const [firmware, setFirmwareState] = useState<FirmwareProgress | null>(null);
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [watching, setWatching] = useState(false);
   const [frames, setFrames] = useState<WatchFrame[]>([]);
@@ -174,8 +226,19 @@ export function useSerialConnection(): SerialConnection {
   const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nextEntryId = useRef(0);
   const crashRef = useRef<{ message: string; at: number } | null>(null);
-  /** `startApp` was sent: the coming disconnect is the board resetting into the app. */
-  const startingAppRef = useRef(false);
+  /** Why the coming disconnect happens (the board was told to restart), if it was. */
+  const restartReasonRef = useRef<string | null>(null);
+  /** The coming restart runs the start-up trace, which is slow. */
+  const tracedBootRef = useRef(false);
+  /** This connection has seen a traced start-up's progress lines. */
+  const traceSeenRef = useRef(false);
+  /** An image to install once the board comes back in the bootloader. */
+  const pendingImageRef = useRef<FirmwareImage | null>(null);
+  const firmwareRef = useRef<FirmwareProgress | null>(null);
+  const setFirmware = useCallback((next: FirmwareProgress | null) => {
+    firmwareRef.current = next;
+    setFirmwareState(next);
+  }, []);
 
   const updateStatus = useCallback((next: SerialStatus) => {
     statusRef.current = next;
@@ -324,6 +387,7 @@ export function useSerialConnection(): SerialConnection {
       activePortRef.current = port;
       setActivePort(port);
 
+      traceSeenRef.current = false;
       const transport = new WebSerialTransport(port, describePort(port));
       let nextClient: SerialClient | null = null;
       try {
@@ -341,6 +405,9 @@ export function useSerialConnection(): SerialConnection {
               });
             } else if (boardStatus?.kind === "ready" && statusRef.current === "connected") {
               onBoardRestarted();
+            } else if (boardStatus?.kind === "startup") {
+              traceSeenRef.current = true;
+              setStartupStep(boardStatus.done ? null : boardStatus.step);
             }
             const frame = watchingRef.current && !isJsonLine(line);
             if (!frame) {
@@ -364,42 +431,54 @@ export function useSerialConnection(): SerialConnection {
           updateStatus("lost");
           setBootloader(null);
           const crash = recentCrash();
-          const startingApp = startingAppRef.current;
-          startingAppRef.current = false;
+          const restartReason = restartReasonRef.current;
+          restartReasonRef.current = null;
           setError(
             crash
               ? crashText(crash.message)
-              : startingApp
-                ? "Starting the app. The board reconnects automatically."
-                : "The board disconnected. Plug it back in to reconnect.",
+              : pendingImageRef.current
+                ? "Restarting into update mode to install the firmware. The board reconnects automatically."
+                : (restartReason ?? "The board disconnected. Plug it back in to reconnect."),
           );
         });
 
         // Only the identity is read here. Details and the clock wait until the
         // caller confirms the board is the user's (see useBoardLink).
         try {
-          if (afterLoss) {
-            // Listen from the start so a `datalogger-ready` sent while the first
-            // read is in flight isn't missed.
-            const booted = started.waitForLine(isReadyLine, BOOT_WAIT_MS);
-            const waitForBoot = async () => {
-              setWaitingForBoot(true);
-              try {
-                await booted;
-              } finally {
-                setWaitingForBoot(false);
-              }
-            };
-            // After a crash the board is certainly rebooting: don't talk over it.
-            if (recentCrash()) await waitForBoot();
+          // Listen from the start so a `datalogger-ready` sent while the first
+          // read is in flight isn't missed.
+          const traced = tracedBootRef.current;
+          tracedBootRef.current = false;
+          const booted = started.waitForLine(isReadyLine, TRACED_BOOT_WAIT_MS);
+          const waitForBoot = async () => {
+            setWaitingForBoot(true);
+            let timer: ReturnType<typeof setTimeout> | undefined;
             try {
-              await refreshIdentity();
-            } catch (cause) {
-              if (!(cause instanceof SerialTimeoutError)) throw cause;
-              await waitForBoot();
-              await refreshIdentity();
+              const shortWait = new Promise<boolean>((resolve) => {
+                timer = setTimeout(() => resolve(false), BOOT_WAIT_MS);
+              });
+              const ready = await Promise.race([booted, shortWait]);
+              clearTimeout(timer);
+              // A traced start-up pauses at every step: keep waiting while
+              // it's the one running (asked for, or reporting its steps).
+              if (!ready && (traced || traceSeenRef.current)) await booted;
+            } finally {
+              clearTimeout(timer);
+              setWaitingForBoot(false);
+              setStartupStep(null);
             }
-          } else {
+          };
+          // After a crash or a traced restart the board is certainly still
+          // starting: don't talk over it.
+          if (recentCrash() || traced) await waitForBoot();
+          try {
+            await refreshIdentity();
+          } catch (cause) {
+            if (!(cause instanceof SerialTimeoutError)) throw cause;
+            // A board that just reappeared, or one in the middle of a traced
+            // start-up (e.g. after a page refresh), answers once it's started.
+            if (!afterLoss && !traceSeenRef.current) throw cause;
+            await waitForBoot();
             await refreshIdentity();
           }
         } catch (cause) {
@@ -409,11 +488,16 @@ export function useSerialConnection(): SerialConnection {
           crashRef.current = null;
           updateStatus("bootloader");
           void refreshPorts();
+          const pending = pendingImageRef.current;
+          pendingImageRef.current = null;
+          if (pending) void runInstallRef.current(started, pending, true);
           return;
         }
         crashRef.current = null;
         updateStatus("connected");
         void refreshPorts();
+        const install = firmwareRef.current;
+        if (install?.stage === "starting") setFirmware({ ...install, stage: "done" });
       } catch (cause) {
         clientRef.current = null;
         setClient(null);
@@ -472,17 +556,134 @@ export function useSerialConnection(): SerialConnection {
 
   const dismissRestart = useCallback(() => setRestart(null), []);
 
+  /**
+   * Write `image` through a bootloader client, then start it. `fromApp`: the
+   * board was running its firmware and restarted into update mode for this.
+   */
+  const runInstall = useCallback(
+    async (active: SerialClient, image: FirmwareImage, fromApp: boolean) => {
+      const version = image.version;
+      setFirmware({ stage: "writing", version, written: 0, total: image.bytes.length });
+      const minimum = image.minBootloader;
+      if (minimum) {
+        // Checked here, before `begin`: only the bootloader knows its version.
+        let have: string | null = null;
+        try {
+          have = (await readBootloaderInfo(active)).version;
+        } catch {
+          // Unreadable counts as too old, below.
+        }
+        if (bootloaderTooOld(have, minimum)) {
+          setFirmware({
+            stage: "error",
+            version,
+            message: `${version} needs bootloader ${minimum} or newer; this board has ${have ?? "an unknown version"}. Its firmware wasn't changed. Updating the bootloader needs a probe.`,
+          });
+          // Back to the firmware it was running.
+          if (fromApp) {
+            restartReasonRef.current = STARTING_APP;
+            await bootApp(active).catch(() => {
+              restartReasonRef.current = null;
+            });
+          }
+          return;
+        }
+      }
+      try {
+        const installed = await installImage(active, image, (written, total) =>
+          setFirmware(
+            written < total
+              ? { stage: "writing", version, written, total }
+              : { stage: "checking", version },
+          ),
+        );
+        setFirmware({ stage: "starting", version: installed, installedAt: new Date().toISOString() });
+        restartReasonRef.current = STARTING_APP;
+        await bootApp(active);
+      } catch (cause) {
+        restartReasonRef.current = null;
+        setFirmware({
+          stage: "error",
+          version,
+          message: message(cause, "The firmware install failed."),
+        });
+      }
+    },
+    [setFirmware],
+  );
+  // `openPort` picks a pending install back up; it's defined first.
+  const runInstallRef = useRef(runInstall);
+  runInstallRef.current = runInstall;
+
+  const installFirmware = useCallback(
+    async (image: FirmwareImage) => {
+      const active = clientRef.current;
+      if (!active) throw new Error("Connect to a board first.");
+      if (!(await imageIntact(image))) {
+        setFirmware({
+          stage: "error",
+          version: image.version,
+          message: "This image is damaged: it doesn't match the hash in its header. The board wasn't changed.",
+        });
+        return;
+      }
+      if (statusRef.current === "bootloader") {
+        await runInstall(active, image, false);
+        return;
+      }
+      setFirmware({ stage: "restarting", version: image.version });
+      pendingImageRef.current = image;
+      try {
+        await active.send({ object: "board", action: "bootloader" });
+      } catch (cause) {
+        pendingImageRef.current = null;
+        setFirmware({
+          stage: "error",
+          version: image.version,
+          message: message(
+            cause,
+            "The board didn't restart into update mode. Its firmware may be too old for updates over USB.",
+          ),
+        });
+      }
+    },
+    [runInstall, setFirmware],
+  );
+
+  const dismissFirmware = useCallback(() => setFirmware(null), [setFirmware]);
+
   const startApp = useCallback(async () => {
     const active = clientRef.current;
     if (!active || statusRef.current !== "bootloader") return;
-    startingAppRef.current = true;
+    restartReasonRef.current = STARTING_APP;
     try {
       await bootApp(active);
     } catch (cause) {
-      startingAppRef.current = false;
+      restartReasonRef.current = null;
       throw cause;
     }
   }, []);
+
+  const sendRestarting = useCallback(
+    async (command: SerialRecord, reason: string, { traced = false } = {}) => {
+      const active = clientRef.current;
+      if (!active) throw new Error("Connect to a board first.");
+      restartReasonRef.current = reason;
+      tracedBootRef.current = traced;
+      try {
+        return await active.send(command);
+      } catch (cause) {
+        // Without a reply the board may still have restarted, so a timeout
+        // keeps the reason and the slow wait for the coming reconnect.
+        if (!(cause instanceof SerialTimeoutError)) {
+          restartReasonRef.current = null;
+          tracedBootRef.current = false;
+        }
+        throw cause;
+      }
+    },
+    [],
+  );
 
   const disconnect = useCallback(async () => {
     const active = clientRef.current;
@@ -501,8 +702,12 @@ export function useSerialConnection(): SerialConnection {
     setRestart(null);
     setBootloader(null);
     crashRef.current = null;
-    startingAppRef.current = false;
-  }, [dropClient, updateStatus]);
+    restartReasonRef.current = null;
+    tracedBootRef.current = false;
+    setStartupStep(null);
+    pendingImageRef.current = null;
+    setFirmware(null);
+  }, [dropClient, setFirmware, updateStatus]);
 
   const startWatch = useCallback(
     async ({ debug = false, sink = null }: StartWatchOptions = {}) => {
@@ -581,6 +786,15 @@ export function useSerialConnection(): SerialConnection {
     [],
   );
 
+  useEffect(() => {
+    if (!error) return;
+    setErrorHistory((entries) =>
+      [...entries, { at: new Date().toISOString(), status: statusRef.current, message: error }].slice(
+        -MAX_ERRORS,
+      ),
+    );
+  }, [error]);
+
   return {
     supported,
     ports,
@@ -593,10 +807,16 @@ export function useSerialConnection(): SerialConnection {
     clockSetAt,
     connectedAt,
     waitingForBoot,
+    startupStep,
+    errorHistory,
     restart,
     dismissRestart,
     bootloader,
     startApp,
+    sendRestarting,
+    firmware,
+    installFirmware,
+    dismissFirmware,
     transcript,
     watching,
     frames,

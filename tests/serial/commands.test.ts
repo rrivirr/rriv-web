@@ -14,7 +14,9 @@ import {
   removeAllSensors,
   setDatalogger,
   readBoardVersion,
+  readBootloaderInfo,
   readDevice,
+  readStartupReport,
   serialSend,
   readTelemeter,
   setCommand,
@@ -223,6 +225,46 @@ describe("change tracking", () => {
     expect(changedProps({ a: 1, b: "x", c: true }, { a: 1, b: "y", c: true, d: null })).toEqual({
       b: "y",
       d: null,
+    });
+  });
+});
+
+describe("start-up log", () => {
+  it("reads the start-up report", async () => {
+    const { client, send } = stub({
+      startup: {
+        previous_completed: false,
+        stopped_at: "i2c2",
+        failed_startups: 2,
+        reset_cause: "watchdog",
+        traced: false,
+      },
+    });
+    await expect(readStartupReport(client)).resolves.toEqual({
+      previousCompleted: false,
+      stoppedAt: "i2c2",
+      failedStartups: 2,
+      resetCause: "watchdog",
+      traced: false,
+    });
+    expect(send).toHaveBeenCalledWith({ object: "board", action: "get", parameter: "startup" });
+  });
+
+  it("reads null from firmware without a start-up log", async () => {
+    const { client } = stub({ message: "Unsupported param in command" });
+    await expect(readStartupReport(client)).resolves.toBeNull();
+  });
+
+  it("reads a start-up loop from the bootloader", async () => {
+    const { client } = stub({
+      bootloader: "rriv",
+      version: "0.4.0",
+      app_valid: true,
+      app_version: "1.15.0",
+      startup_loop: { stopped_at: "i2c_scan", unfinished: 3 },
+    });
+    await expect(readBootloaderInfo(client)).resolves.toMatchObject({
+      startupLoop: { stoppedAt: "i2c_scan", unfinished: 3 },
     });
   });
 });

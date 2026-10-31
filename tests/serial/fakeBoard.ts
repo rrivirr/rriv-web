@@ -1,3 +1,5 @@
+// @ts-expect-error tests run on Node, but its types aren't part of this project
+import { createHash } from "node:crypto";
 import type { SerialPort } from "@/serial";
 
 type Command = Record<string, unknown>;
@@ -73,18 +75,77 @@ export const defaultBoard: Responder = (command) => {
   return {};
 };
 
-/** A board in update mode: the bootloader answers only its own commands. */
-export function bootloaderBoard(appValid = true): Responder {
-  return (command) => {
+/**
+ * A board in update mode: the bootloader answers only its own commands,
+ * including an install (`begin` / `write` / `finish`). `received` collects
+ * the written bytes.
+ */
+export function bootloaderBoard(
+  appValid = true,
+  options: {
+    /** Refuse the image at `finish` (after writing) with this error. */
+    refuse?: string;
+    /** Refuse its header (the first block), before anything is erased. */
+    refuseHeader?: string;
+    startupLoop?: Record<string, unknown>;
+  } = {},
+) {
+  let next = 0;
+  let size = 0;
+  const received: number[] = [];
+  const respond: Responder = (command) => {
     if (command.object !== "bootloader") {
       return { status: "error", message: "in bootloader mode", error: "unsupported command" };
     }
     if (command.action === "info") {
-      return { bootloader: "rriv", version: "0.1.0", app_valid: appValid };
+      const loop = options.startupLoop ? { startup_loop: options.startupLoop } : {};
+      return appValid
+        ? { bootloader: "rriv", version: "0.3.0", app_valid: true, app_version: "1.15.0", ...loop }
+        : { bootloader: "rriv", version: "0.3.0", app_valid: false, app_error: "no_header" };
     }
     if (command.action === "boot") return { message: "booting" };
+    if (command.action === "begin") {
+      size = Number(command.size);
+      next = 0;
+      received.length = 0;
+      return { message: "ready", block: 512 };
+    }
+    if (command.action === "write") {
+      if (command.offset !== next) {
+        return { status: "error", message: "unexpected offset", error: "", offset: next };
+      }
+      if (command.offset === 0 && options.refuseHeader) {
+        return { status: "error", message: "image refused", error: options.refuseHeader };
+      }
+      const bytes = Uint8Array.from(atob(String(command.data)), (c) => c.charCodeAt(0));
+      received.push(...bytes);
+      next += bytes.length;
+      return { message: "ok", offset: next };
+    }
+    if (command.action === "finish") {
+      if (next !== size) return { status: "error", message: "image incomplete", error: "", offset: next };
+      if (options.refuse) return { status: "error", message: "image refused", error: options.refuse };
+      return { message: "installed", app_version: "2.0.0" };
+    }
     return { status: "error", message: "unknown bootloader command", error: "" };
   };
+  return Object.assign(respond, { received });
+}
+
+/** A signed-image file as `rriv_image sign` writes it (fake signature). */
+export function signedImage(version: string, appSize: number): Uint8Array {
+  const bytes = new Uint8Array(512 + appSize).fill(0xff);
+  const view = new DataView(bytes.buffer);
+  bytes.set([0x52, 0x52, 0x49, 0x56], 0);
+  view.setUint16(4, 1, true);
+  view.setUint16(6, 512, true);
+  view.setUint32(8, appSize, true);
+  view.setUint32(12, 0, true);
+  bytes.fill(0, 16, 48);
+  bytes.set([...version].map((c) => c.charCodeAt(0)), 16);
+  for (let i = 512; i < bytes.length; i += 1) bytes[i] = i % 251;
+  bytes.set(createHash("sha256").update(bytes.subarray(512)).digest(), 48);
+  return bytes;
 }
 
 /** Install a fake `navigator.serial`. Returns a way to fire plug events. */

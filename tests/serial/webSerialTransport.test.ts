@@ -71,4 +71,65 @@ describe("WebSerialTransport", () => {
     expect(transport.label).toBe("RRIV device");
     await expect(transport.writeLine("x")).rejects.toThrow(/not open/i);
   });
+
+  it("closes the port for real, so it can be opened again", async () => {
+    const port = browserLikePort();
+    const transport = new WebSerialTransport(port);
+    await transport.open();
+    const lines = transport.lines();
+    void lines.next();
+    await transport.close();
+    expect(port.isOpen()).toBe(false);
+
+    const again = new WebSerialTransport(port);
+    await expect(again.open()).resolves.toBeUndefined();
+    await again.close();
+  });
+
+  it("reopens a port an earlier connection left open", async () => {
+    const port = browserLikePort();
+    await port.open({ baudRate: 115200 });
+    const transport = new WebSerialTransport(port);
+    await expect(transport.open()).resolves.toBeUndefined();
+    expect(port.isOpen()).toBe(true);
+    await transport.close();
+  });
 });
+
+/**
+ * A port that behaves like Chrome's: open() fails on an open port, and close()
+ * fails while its streams are locked.
+ */
+function browserLikePort() {
+  let open = false;
+  let readable: ReadableStream<Uint8Array> | null = null;
+  let writable: WritableStream<Uint8Array> | null = null;
+  const port = {
+    get readable() {
+      return readable;
+    },
+    get writable() {
+      return writable;
+    },
+    open: async () => {
+      if (open) throw new DOMException("The port is already open.", "InvalidStateError");
+      open = true;
+      readable = new ReadableStream<Uint8Array>();
+      writable = new WritableStream<Uint8Array>();
+    },
+    close: async () => {
+      if (readable?.locked || writable?.locked) {
+        throw new TypeError("Cannot cancel a locked stream");
+      }
+      open = false;
+      readable = null;
+      writable = null;
+    },
+    isOpen: () => open,
+    getInfo: () => ({}),
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  };
+  return port as unknown as SerialPort & { isOpen: () => boolean };
+}

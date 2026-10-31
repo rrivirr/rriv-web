@@ -142,6 +142,35 @@ export function useCreateDataloggerConfig() {
   });
 }
 
+/** Record an install in the device's firmware history (`POST /device/firmware/history`). */
+export function useCreateFirmwareEntry() {
+  const api = useApiClient();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: {
+      deviceId: string;
+      contextId: string;
+      version: string;
+      installedAt: string;
+    }) => api.post<void>("/device/firmware/history", body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["firmware"] }),
+  });
+}
+
+/** One line (max 100 characters) in the device's log (`POST /device/log`). */
+export function useCreateDeviceLog() {
+  const api = useApiClient();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { identifier: string; log: string }) =>
+      api.post<void>("/device/log", { ...body, log: body.log.slice(0, DEVICE_LOG_MAX) }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["device-log"] }),
+  });
+}
+
+/** rriv-api's limit for one device log line. */
+export const DEVICE_LOG_MAX = 100;
+
 /** A friendlier message for the bind errors the CLI special-cases. */
 export function bindErrorMessage(error: unknown): string {
   if (error instanceof ApiError && error.message === "device bound to another user") {

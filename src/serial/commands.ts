@@ -39,6 +39,9 @@ const asString = (value: unknown): string | null =>
 
 const messageOf = (response: SerialRecord) => asString(response.message);
 
+const isRecord = (value: unknown): value is SerialRecord =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
 /**
  * Coerce a CLI-style property value. Mirrors `setAction`: `"true"`/`"false"`
  * become booleans, numeric strings become numbers, everything else stays text.
@@ -102,6 +105,15 @@ export interface BootloaderInfo {
   version: string | null;
   /** A valid app is installed, so the board can leave update mode. */
   appValid: boolean;
+  /** The installed app's version, from its signed header. */
+  appVersion: string | null;
+  /** Why the installed app was refused (e.g. `hash_mismatch`), if it was. */
+  appError: string | null;
+  /**
+   * The app's start-up kept stopping at the same point, so the bootloader
+   * didn't start it (bootloader 0.4.0+).
+   */
+  startupLoop: { stoppedAt: string; unfinished: number } | null;
 }
 
 /**
@@ -114,8 +126,63 @@ export const isBootloaderReply = (cause: unknown) =>
 /** `{"object":"bootloader","action":"info"}` → bootloader version + app check. */
 export async function readBootloaderInfo(client: SerialClient): Promise<BootloaderInfo> {
   const response = await client.send({ object: "bootloader", action: "info" });
-  return { version: asString(response.version), appValid: response.app_valid === true };
+  return {
+    version: asString(response.version),
+    appValid: response.app_valid === true,
+    appVersion: asString(response.app_version),
+    appError: asString(response.app_error),
+    startupLoop: isRecord(response.startup_loop)
+      ? {
+          stoppedAt: asString(response.startup_loop.stopped_at) ?? "unknown",
+          unfinished: Number(response.startup_loop.unfinished) || 0,
+        }
+      : null,
+  };
 }
+
+/** How the board's last start-ups went (`board get startup`). */
+export interface StartupReport {
+  /** The start-up before this one finished. */
+  previousCompleted: boolean;
+  /** Where the last unfinished start-up stopped. */
+  stoppedAt: string | null;
+  /** Unfinished start-ups in a row before this one. */
+  failedStartups: number;
+  /** What reset the board before this start-up (`watchdog`, `power_on`, …). */
+  resetCause: string;
+  /** This start-up ran with the start-up trace. */
+  traced: boolean;
+}
+
+/**
+ * `board get startup`. Resolves `null` on firmware that doesn't keep a
+ * start-up log (it answers "Unsupported param in command").
+ */
+export async function readStartupReport(client: SerialClient): Promise<StartupReport | null> {
+  const response = await client.send({ object: "board", action: "get", parameter: "startup" });
+  const report = response.startup;
+  if (!isRecord(report)) return null;
+  return {
+    previousCompleted: report.previous_completed === true,
+    stoppedAt: asString(report.stopped_at),
+    failedStartups: Number(report.failed_startups) || 0,
+    resetCause: asString(report.reset_cause) ?? "unknown",
+    traced: report.traced === true,
+  };
+}
+
+/** Default datalogger settings and no sensors; the board keeps its serial number and restarts. */
+export const DATALOGGER_RESET = { object: "datalogger", action: "reset" } as const;
+
+/**
+ * Factory wipe: blank serial number, default settings, no sensors; the board
+ * restarts unprovisioned. `serialNumber` must be the board's own.
+ */
+export const deviceReset = (serialNumber: string) =>
+  ({ object: "device", action: "reset", serial_number: serialNumber }) as const;
+
+/** Restart with the start-up trace (`{"startup":…}` lines over USB). */
+export const STARTUP_TRACE = { object: "board", action: "diagnostic" } as const;
 
 /**
  * `{"object":"bootloader","action":"boot"}`: leave update mode. The board

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError } from "@/api/client";
 import {
   bindErrorMessage,
@@ -6,6 +6,8 @@ import {
   pickDriver,
   sensorConfigUpload,
   useCreateDataloggerConfig,
+  useCreateDeviceLog,
+  useCreateFirmwareEntry,
   useCreateSensorConfig,
   useDataloggerDrivers,
   useDeviceBySerial,
@@ -17,11 +19,15 @@ import { useBindDevice, useCreateDeviceContext } from "@/api/mutations";
 import { useMe } from "@/api/me";
 import type { Device } from "@/api/types";
 import {
+  DATALOGGER_RESET,
   type SerialConnection,
   type SerialRecord,
   SerialTimeoutError,
+  deviceReset,
+  type StartupReport,
   getDatalogger,
   isValidUid,
+  readStartupReport,
   readTelemeter,
   setSerialNumber,
 } from "@/serial";
@@ -60,10 +66,31 @@ export type SyncOutcome =
   | { kind: "skipped"; reason: string }
   | { kind: "failed"; error: string };
 
+/** Recording a firmware install in the device's history; `outcome` is null while it's sent. */
+export interface FirmwareRecord {
+  installedAt: string;
+  outcome: SyncOutcome | null;
+}
+
+/**
+ * A reset asked for in this session and what happened in the cloud after it.
+ * `outcome` is null until the cloud step has run.
+ */
+export type ResetNotice =
+  /** Default settings recorded once the board is back. */
+  | { kind: "datalogger"; outcome: SyncOutcome | null }
+  /** The board wiped; its device stays in rriv-api, bound as before. */
+  | { kind: "factory"; serialNumber: string };
+
 interface Placement {
   deviceId: string;
   contextId: string;
 }
+
+const notLinkedFirmware: SyncOutcome = {
+  kind: "skipped",
+  reason: "Link this board to a context to record the install in its firmware history.",
+};
 
 const errorText = (cause: unknown) =>
   cause instanceof Error ? cause.message : String(cause);
@@ -84,6 +111,16 @@ export function useBoardLink(serial: SerialConnection) {
   const registerEui = useRegisterEui();
   const createSensorConfig = useCreateSensorConfig();
   const createDataloggerConfig = useCreateDataloggerConfig();
+  const { mutateAsync: createFirmwareEntry } = useCreateFirmwareEntry();
+  const { mutate: createDeviceLog } = useCreateDeviceLog();
+  /** `undefined` until read this connection; `null` on firmware without a start-up log. */
+  const [startupReport, setStartupReport] = useState<StartupReport | null | undefined>(undefined);
+  /** Device log lines sent this session, so a repeated failure is logged once. */
+  const logged = useRef(new Map<string, number>());
+  const [resetNotice, setResetNotice] = useState<ResetNotice | null>(null);
+  /** When `datalogger reset` was sent; its settings sync waits for a later connection. */
+  const [resetRequestedAt, setResetRequestedAt] = useState<number | null>(null);
+  const [firmwareRecord, setFirmwareRecord] = useState<FirmwareRecord | null>(null);
 
   const { mutateAsync: bindDevice } = bind;
   // Every connection (including an automatic reconnect after a crash) gets a
@@ -163,6 +200,55 @@ export function useBoardLink(serial: SerialConnection) {
       .catch(() => undefined);
   }, [owned, liveClient, detailsRead, refreshDetails, syncClock]);
 
+  // The start-up log, once per connection after the details are read.
+  useEffect(() => {
+    setStartupReport(undefined);
+  }, [connectedAt]);
+  useEffect(() => {
+    if (!owned || !liveClient || !detailsRead || startupReport !== undefined) return;
+    let current = true;
+    readStartupReport(liveClient)
+      .then((report) => current && setStartupReport(report))
+      .catch(() => current && setStartupReport(null));
+    return () => {
+      current = false;
+    };
+  }, [owned, liveClient, detailsRead, startupReport]);
+
+  /**
+   * Note something in the device's log in RRIV (for support), at most once an
+   * hour per message. Only for a board confirmed as the user's.
+   */
+  const logToDevice = useCallback(
+    (identifier: string, line: string) => {
+      const sent = logged.current;
+      const last = sent.get(line);
+      if (last !== undefined && Date.now() - last < 60 * 60 * 1000) return;
+      sent.set(line, Date.now());
+      createDeviceLog({ identifier, log: line }, { onError: () => sent.delete(line) });
+    },
+    [createDeviceLog],
+  );
+
+  useEffect(() => {
+    if (!startupReport || startupReport.previousCompleted || !serialNumber || !owned) return;
+    const runs = startupReport.failedStartups + 1;
+    logToDevice(
+      serialNumber,
+      `web: start-up stopped at ${startupReport.stoppedAt ?? "unknown"} (${startupReport.resetCause}), ${runs} unfinished in a row`,
+    );
+  }, [startupReport, serialNumber, owned, logToDevice]);
+
+  // Connection failures on a board known to be the user's.
+  const ownedSerial = useRef<string | null>(null);
+  if (owned && serialNumber) ownedSerial.current = serialNumber;
+  const { status: connectionStatus, error: connectionError } = serial;
+  useEffect(() => {
+    const known = ownedSerial.current;
+    if (connectionStatus !== "error" || !connectionError || !known) return;
+    logToDevice(known, `web: connect failed: ${connectionError}`);
+  }, [connectionStatus, connectionError, logToDevice]);
+
   const retry = () => {
     setClaim(null);
     void deviceQuery.refetch();
@@ -214,6 +300,100 @@ export function useBoardLink(serial: SerialConnection) {
         return { kind: "failed", error: errorText(cause) };
       }
   };
+
+  // A web install is recorded once the board is back in the app and confirmed
+  // as the user's, against the context it's placed in.
+  const installed = serial.firmware?.stage === "done" ? serial.firmware : null;
+  const deviceId = target?.deviceId;
+  const contextId = target?.contextId;
+  const recordFirmware = useCallback(async () => {
+    if (!installed) return;
+    const { version, installedAt } = installed;
+    if (!deviceId || !contextId) {
+      setFirmwareRecord({ installedAt, outcome: notLinkedFirmware });
+      return;
+    }
+    setFirmwareRecord({ installedAt, outcome: null });
+    try {
+      await createFirmwareEntry({ deviceId, contextId, version, installedAt });
+      setFirmwareRecord({ installedAt, outcome: { kind: "synced" } });
+    } catch (cause) {
+      setFirmwareRecord({ installedAt, outcome: { kind: "failed", error: errorText(cause) } });
+    }
+  }, [installed, deviceId, contextId, createFirmwareEntry]);
+
+  // Wait while ownership is still being checked (or the check failed and may be retried).
+  const settled = !["reading", "checking", "cloud-error"].includes(stage);
+  useEffect(() => {
+    if (!installed || !settled || firmwareRecord?.installedAt === installed.installedAt) return;
+    if (stage === "ready" || stage === "no-context") {
+      void recordFirmware();
+    } else {
+      // Reachable through update mode, whose recovery install doesn't check
+      // ownership (the bootloader can't say which board it is).
+      setFirmwareRecord({
+        installedAt: installed.installedAt,
+        outcome: { kind: "skipped", reason: "This board isn't on your account, so the install isn't recorded." },
+      });
+    }
+  }, [installed, settled, stage, firmwareRecord?.installedAt, recordFirmware]);
+
+  const firmwareHistory =
+    installed && firmwareRecord?.installedAt === installed.installedAt
+      ? { ...firmwareRecord, retry: recordFirmware }
+      : null;
+
+  /**
+   * `datalogger reset`: default settings and no sensors. The board restarts;
+   * once it's back, its (default) settings are recorded in the cloud.
+   */
+  const resetDatalogger = async () => {
+    await serial.sendRestarting(
+      DATALOGGER_RESET,
+      "Resetting the datalogger settings to their defaults. The board restarts and reconnects automatically.",
+    );
+    setResetRequestedAt(Date.now());
+    setResetNotice({ kind: "datalogger", outcome: null });
+  };
+
+  const { datalogger: boardSettings } = serial;
+  useEffect(() => {
+    if (resetRequestedAt === null || connectedAt <= resetRequestedAt) return;
+    if (!owned || !detailsRead || !boardSettings) return;
+    setResetRequestedAt(null);
+    void syncDatalogger(boardSettings).then((outcome) =>
+      setResetNotice({ kind: "datalogger", outcome }),
+    );
+    // syncDatalogger is rebuilt every render, so it isn't a dependency; the
+    // reset clears resetRequestedAt above, so this runs once per reset.
+  }, [resetRequestedAt, connectedAt, owned, detailsRead, boardSettings]);
+
+  /** Provisioners can wipe a board they own back to unprovisioned. */
+  const canFactoryReset = Boolean(me.data?.isProvisioner) && owned && Boolean(serialNumber);
+
+  /**
+   * `device reset`: blank serial number, default settings, no sensors. The
+   * device stays in rriv-api, bound as before, so provisioning the board again
+   * gives back the same serial number and it's back on the account.
+   */
+  const factoryReset = async () => {
+    if (!canFactoryReset || !serialNumber) throw new Error("Only a provisioner can factory-reset a board they own.");
+    const wiped = serialNumber;
+    await serial.sendRestarting(
+      deviceReset(wiped),
+      "Factory reset: the board restarts without a serial number and needs provisioning again.",
+    );
+    setResetNotice({ kind: "factory", serialNumber: wiped });
+  };
+
+  const retryResetSync = async () => {
+    if (resetNotice?.kind === "datalogger" && boardSettings) {
+      setResetNotice({ kind: "datalogger", outcome: null });
+      setResetNotice({ kind: "datalogger", outcome: await syncDatalogger(boardSettings) });
+    }
+  };
+
+  const dismissResetNotice = () => setResetNotice(null);
 
   /** `rrivctl provision device --skip`: create the cloud record, write the serial number. */
   const provision = async () => {
@@ -307,6 +487,14 @@ export function useBoardLink(serial: SerialConnection) {
     provision,
     assignContext,
     registerTelemeter,
+    firmwareHistory,
+    startupReport,
+    resetDatalogger,
+    canFactoryReset,
+    factoryReset,
+    resetNotice,
+    retryResetSync,
+    dismissResetNotice,
   };
 }
 
