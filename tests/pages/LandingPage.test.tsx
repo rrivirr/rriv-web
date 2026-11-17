@@ -31,4 +31,18 @@ describe("LandingPage", () => {
       "/signup",
     );
   });
+
+  it("links to the project pages inside the app", () => {
+    renderWithProviders(<LandingPage />, { auth: { status: "unauthenticated" } });
+
+    for (const [name, href] of [
+      ["Monitoring", "/monitoring"],
+      ["Use cases", "/use-cases"],
+      ["Prototyping", "/prototyping"],
+      ["Contribute", "/contribute"],
+    ]) {
+      expect(screen.getByRole("link", { name })).toHaveAttribute("href", href);
+    }
+    expect(screen.queryByRole("link", { name: /Citizen science/i })).not.toBeInTheDocument();
+  });
 });

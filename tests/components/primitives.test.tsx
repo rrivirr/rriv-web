@@ -62,13 +62,10 @@ describe("SectionCard", () => {
 });
 
 describe("SiteFooter", () => {
-  it("shows the tagline and external links", () => {
+  it("shows the tagline and the GitHub link", () => {
     render(<SiteFooter />);
     expect(screen.getByText(/River Restoration Intelligence/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "rriv.org" })).toHaveAttribute(
-      "href",
-      "https://rriv.org",
-    );
+    expect(screen.queryByRole("link", { name: "rriv.org" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "GitHub" })).toHaveAttribute(
       "href",
       "https://github.com/rrivirr",

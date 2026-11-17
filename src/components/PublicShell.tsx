@@ -1,10 +1,18 @@
-import { Link, Outlet } from "react-router";
+import { useEffect } from "react";
+import { Link, Outlet, useLocation } from "react-router";
 import { Logo } from "@/assets/Logo";
 import { SiteFooter } from "./SiteFooter";
 import { ThemeToggle } from "./ThemeToggle";
 
-/** Public chrome for the landing, sign-in and sign-up screens. */
+/** Public chrome for the landing, sign-up and project pages. */
 export function PublicShell() {
+  const { pathname } = useLocation();
+
+  // Links between public pages should land at the top, not mid-scroll.
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
+
   return (
     <div className="flex min-h-dvh flex-col">
       <header className="sticky top-0 z-30 border-b border-border bg-bg/80 backdrop-blur-xl">

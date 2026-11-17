@@ -7,6 +7,7 @@ import { PublicShell } from "@/components/PublicShell";
 import { AdminPage } from "@/pages/AdminPage";
 import { ContextDetailPage } from "@/pages/ContextDetailPage";
 import { ContextsPage } from "@/pages/ContextsPage";
+import { ContributePage } from "@/pages/ContributePage";
 import { DeviceConnectionPage } from "@/pages/DeviceConnectionPage";
 import { DeviceDetailPage } from "@/pages/DeviceDetailPage";
 import { DevicesPage } from "@/pages/DevicesPage";
@@ -14,8 +15,11 @@ import { LandingPage } from "@/pages/LandingPage";
 import { LibraryConfigPage } from "@/pages/LibraryConfigPage";
 import { LibraryPage } from "@/pages/LibraryPage";
 import { LoginPage } from "@/pages/LoginPage";
+import { MonitoringPage } from "@/pages/MonitoringPage";
 import { NotificationsPage } from "@/pages/NotificationsPage";
+import { PrototypingPage } from "@/pages/PrototypingPage";
 import { SignupPage } from "@/pages/SignupPage";
+import { UseCasesPage } from "@/pages/UseCasesPage";
 
 export function App() {
   return (
@@ -25,6 +29,10 @@ export function App() {
         <Route element={<PublicShell />}>
           <Route path="/" element={<LandingPage />} />
           <Route path="/signup" element={<SignupPage />} />
+          <Route path="/monitoring" element={<MonitoringPage />} />
+          <Route path="/use-cases" element={<UseCasesPage />} />
+          <Route path="/prototyping" element={<PrototypingPage />} />
+          <Route path="/contribute" element={<ContributePage />} />
         </Route>
 
         {/* Standalone auth screens */}

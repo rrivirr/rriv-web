@@ -33,6 +33,16 @@ describe("App routing", () => {
     ).toBeInTheDocument();
   });
 
+  it.each([
+    ["/monitoring", "Monitoring"],
+    ["/use-cases", "Use cases"],
+    ["/prototyping", "Prototyping"],
+    ["/contribute", "Join the RRIV team!"],
+  ])("serves the public project page at %s", (path, heading) => {
+    renderApp(path, { status: "unauthenticated" });
+    expect(screen.getByRole("heading", { level: 1, name: heading })).toBeInTheDocument();
+  });
+
   it("serves the login screen at /login", () => {
     renderApp("/login", { status: "unauthenticated" });
     expect(screen.getByText("Continue to your RRIV dashboard")).toBeInTheDocument();

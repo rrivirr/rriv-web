@@ -1,7 +1,6 @@
 import { Link, Navigate } from "react-router";
 import {
   IconArrowRight,
-  IconExternal,
   IconFlask,
   IconLeaf,
   IconWaves,
@@ -9,8 +8,6 @@ import {
 import { WaveField } from "@/assets/WaveField";
 import { useAuth } from "@/auth/useAuth";
 import { Spinner } from "@/components/Spinner";
-
-const RRIV_ORG = "https://rriv.org";
 
 const PILLARS = [
   {
@@ -30,13 +27,12 @@ const PILLARS = [
   },
 ];
 
-/** Small, secondary outbound links — deliberately quiet. */
+/** Small, secondary links to the project pages — deliberately quiet. */
 const EXPLORE = [
-  { href: `${RRIV_ORG}/monitoring.html`, label: "Monitoring" },
-  { href: `${RRIV_ORG}/use.html`, label: "Use cases" },
-  { href: `${RRIV_ORG}/prototyping.html`, label: "Prototyping" },
-  { href: `${RRIV_ORG}/citizen-science.html`, label: "Citizen science" },
-  { href: `${RRIV_ORG}/contribute.html`, label: "Contribute" },
+  { to: "/monitoring", label: "Monitoring" },
+  { to: "/use-cases", label: "Use cases" },
+  { to: "/prototyping", label: "Prototyping" },
+  { to: "/contribute", label: "Contribute" },
 ];
 
 export function LandingPage() {
@@ -131,21 +127,19 @@ export function LandingPage() {
           <div>
             <h2 className="text-sm font-semibold text-fg">Explore RRIV</h2>
             <p className="mt-1 text-xs text-fg-subtle">
-              Learn more on the project site.
+              Learn more about the project.
             </p>
           </div>
           <nav className="flex flex-wrap items-center gap-x-4 gap-y-2">
             {EXPLORE.map((link) => (
-              <a
-                key={link.href}
-                href={link.href}
-                target="_blank"
-                rel="noreferrer"
+              <Link
+                key={link.to}
+                to={link.to}
                 className="inline-flex items-center gap-1 text-xs font-medium text-fg-muted transition hover:text-accent"
               >
                 {link.label}
-                <IconExternal className="h-3 w-3" />
-              </a>
+                <IconArrowRight className="h-3 w-3" />
+              </Link>
             ))}
           </nav>
         </div>

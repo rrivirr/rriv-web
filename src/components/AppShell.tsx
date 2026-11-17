@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet } from "react-router";
-import { IconAlert, IconChevronDown, IconExternal, IconLogOut } from "@/assets/Icons";
+import { IconAlert, IconChevronDown, IconLogOut } from "@/assets/Icons";
 import { Logo } from "@/assets/Logo";
 import { useMe } from "@/api/me";
 import { useUnreadCount } from "@/api/notifications";
@@ -8,8 +8,6 @@ import { useAuth } from "@/auth/useAuth";
 import { initials } from "@/lib/format";
 import { SiteFooter } from "./SiteFooter";
 import { ThemeToggle } from "./ThemeToggle";
-
-const RRIV_ORG = "https://rriv.org";
 
 export function AppShell() {
   const { user, signout } = useAuth();
@@ -132,16 +130,6 @@ export function AppShell() {
                     ) : null}
                   </div>
                   <div className="my-1 h-px bg-border" />
-                  <a
-                    href={RRIV_ORG}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-fg-muted transition hover:bg-surface-2 hover:text-fg"
-                    role="menuitem"
-                  >
-                    <IconExternal className="h-4 w-4" />
-                    rriv.org
-                  </a>
                   <button
                     type="button"
                     role="menuitem"

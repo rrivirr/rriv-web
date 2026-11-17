@@ -1,7 +1,4 @@
-const RRIV_ORG = "https://rriv.org";
-
 const LINKS = [
-  { href: RRIV_ORG, label: "rriv.org" },
   { href: "https://github.com/rrivirr", label: "GitHub" },
 ];
 
