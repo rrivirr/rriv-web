@@ -1,3 +1,10 @@
+# [1.3.0](https://github.com/rrivirr/rriv-web/compare/v1.2.2...v1.3.0) (2026-11-17)
+
+### Features
+
+* board diagnostics and serial firmware install ([426bb08](https://github.com/rrivirr/rriv-web/commit/426bb089695bcfc103ce403686dc4fac067b4ef0))
+* rriv info pages ([1bad586](https://github.com/rrivirr/rriv-web/commit/1bad58616edb549aeaca8a45bac1a13e89a70bb3))
+
 ## [1.2.2](https://github.com/rrivirr/rriv-web/compare/v1.2.1...v1.2.2) (2026-10-21)
 
 
