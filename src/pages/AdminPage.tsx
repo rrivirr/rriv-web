@@ -186,6 +186,10 @@ export function AdminPage() {
             />
           </div>
         </>
+      ) : metrics.isError ? (
+        <QueryError error={metrics.error} label="system health" />
+      ) : metrics.isPending ? (
+        <Skeleton />
       ) : null}
 
       {resyncAll.isSuccess ? (

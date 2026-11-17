@@ -189,6 +189,28 @@ describe("AdminPage", () => {
     ).toBeInTheDocument();
   });
 
+  it("says so when system health cannot be loaded", async () => {
+    server.use(me(true));
+    server.use(
+      http.get(`${api}/admin/auth-sync`, () =>
+        HttpResponse.json({ items: [row], total: 1 }),
+      ),
+      http.get(`${api}/admin/metrics`, () =>
+        HttpResponse.json({ message: "too many connections" }, { status: 500 }),
+      ),
+      http.get(`${api}/admin/roles`, () => HttpResponse.json([])),
+    );
+
+    renderWithProviders(<AdminPage />);
+    expect(
+      await screen.findByText(
+        "Could not load system health: too many connections",
+      ),
+    ).toBeInTheDocument();
+    // The sync table still renders below the error.
+    expect(await screen.findByText("context:c1")).toBeInTheDocument();
+  });
+
   it("paginates the sync table", async () => {
     const user = userEvent.setup();
     const offsets: string[] = [];
