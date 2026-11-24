@@ -1,3 +1,9 @@
+## [1.3.1](https://github.com/rrivirr/rriv-web/compare/v1.3.0...v1.3.1) (2026-11-17)
+
+### Bug Fixes
+
+* add status check to metrics dashboard ([84eb36c](https://github.com/rrivirr/rriv-web/commit/84eb36c90319083c67675cd16cc6be9dc2def4b0))
+
 # [1.3.0](https://github.com/rrivirr/rriv-web/compare/v1.2.2...v1.3.0) (2026-11-17)
 
 ### Features
