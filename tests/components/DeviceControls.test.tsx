@@ -111,7 +111,7 @@ describe("SaveSnapshotForm", () => {
     server.use(
       http.post("http://api.test/configSnapshot/save", async ({ request }) => {
         body = await request.json();
-        return new HttpResponse(null, { status: 204 });
+        return HttpResponse.json({ id: "snap1", name: "baseline" }, { status: 201 });
       }),
     );
 
@@ -126,7 +126,11 @@ describe("SaveSnapshotForm", () => {
         contextId: "c1",
       }),
     );
-    expect(await screen.findByText("Saved.")).toBeInTheDocument();
+    expect(await screen.findByText(/Saved\./)).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Apply to a board" })).toHaveAttribute(
+      "href",
+      "/connect?apply=saved%3Asnap1",
+    );
   });
 });
 

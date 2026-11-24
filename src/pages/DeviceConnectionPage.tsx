@@ -1,4 +1,6 @@
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router";
+import { parseApplyParam } from "@/api/library";
 import { BoardHeader } from "@/components/connect/BoardHeader";
 import { BootloaderPanel } from "@/components/connect/BootloaderPanel";
 import { ConnectPanel } from "@/components/connect/ConnectPanel";
@@ -7,6 +9,7 @@ import { DataloggerTab } from "@/components/connect/DataloggerTab";
 import { FirmwareProgressCard, FirmwareTab } from "@/components/connect/FirmwareInstall";
 import { DiagnosticsButton } from "@/components/connect/DiagnosticsButton";
 import { ResetNoticeCard } from "@/components/connect/Resets";
+import { LibraryApplyTab } from "@/components/connect/LibraryApplyTab";
 import { LiveTab } from "@/components/connect/LiveTab";
 import { OverviewTab } from "@/components/connect/OverviewTab";
 import { SensorsTab } from "@/components/connect/SensorsTab";
@@ -23,7 +26,7 @@ import { useBoardLink } from "@/components/connect/useBoardLink";
 import { EmptyState } from "@/components/EmptyState";
 import { isWebSerialSupported, useSerialConnection } from "@/serial";
 
-type Tab = "overview" | "sensors" | "datalogger" | "live" | "console" | "firmware";
+type Tab = "overview" | "sensors" | "datalogger" | "library" | "live" | "console" | "firmware";
 
 export function DeviceConnectionPage() {
   if (!isWebSerialSupported()) {
@@ -50,7 +53,12 @@ export function DeviceConnectionPage() {
 function DeviceConnection() {
   const serial = useSerialConnection();
   const link = useBoardLink(serial);
-  const [tab, setTab] = useState<Tab>("overview");
+  const [searchParams] = useSearchParams();
+  const applyParam = searchParams.get("apply");
+  /** `?apply=<kind>:<id>:<version>` from a library page: open that config ready to apply. */
+  const applyRequest = useMemo(() => parseApplyParam(applyParam), [applyParam]);
+  const firstTab: Tab = applyRequest ? "library" : "overview";
+  const [tab, setTab] = useState<Tab>(firstTab);
   const [skippedSetup, setSkippedSetup] = useState(false);
   const [setupResult, setSetupResult] = useState<Feedback | null>(null);
 
@@ -59,7 +67,9 @@ function DeviceConnection() {
   useEffect(() => {
     setSkippedSetup(false);
     setSetupResult(null);
-    setTab("overview");
+    setTab(firstTab);
+    // Only a new board or connection resets the tab, not a change of link.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serialNumber, serial.activePort]);
 
   const client = serial.client;
@@ -98,6 +108,7 @@ function DeviceConnection() {
     { id: "overview" as const, label: "Overview" },
     { id: "sensors" as const, label: "Sensors" },
     { id: "datalogger" as const, label: "Datalogger" },
+    { id: "library" as const, label: "From library" },
     {
       id: "live" as const,
       label: "Live data",
@@ -167,6 +178,9 @@ function DeviceConnection() {
             {tab === "overview" ? <OverviewTab serial={serial} link={link} locked={locked} /> : null}
             {tab === "sensors" ? <SensorsTab client={client} link={link} locked={locked} /> : null}
             {tab === "datalogger" ? <DataloggerTab serial={serial} link={link} locked={locked} /> : null}
+            {tab === "library" ? (
+              <LibraryApplyTab serial={serial} link={link} locked={locked} request={applyRequest} />
+            ) : null}
             {tab === "live" ? <LiveTab serial={serial} /> : null}
             {tab === "firmware" ? <FirmwareTab serial={serial} locked={locked} /> : null}
             {tab === "console" ? (

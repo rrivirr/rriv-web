@@ -13,6 +13,7 @@ import { QueryError } from "@/components/QueryError";
 import { Skeleton } from "@/components/Skeleton";
 import { Spinner } from "@/components/Spinner";
 import { formatRelative } from "@/lib/format";
+import { CONTEXT_NAME_MAX, nameProblem } from "@/lib/validation";
 
 const PAGE_SIZE = 24;
 
@@ -67,7 +68,7 @@ export function ContextsPage() {
   function onCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const value = newName.trim();
-    if (value.length < 3 || value.length > 20) return;
+    if (nameProblem(value, "Context name", false, CONTEXT_NAME_MAX)) return;
     createContext.mutate(
       { name: value },
       {
@@ -109,11 +110,12 @@ export function ContextsPage() {
               htmlFor="new-context-name"
               className="mb-1.5 block text-xs font-medium text-fg-muted"
             >
-              Context name (3–20)
+              Context name
             </label>
             <input
               id="new-context-name"
               className="field"
+              maxLength={CONTEXT_NAME_MAX}
               value={newName}
               onChange={(event) => setNewName(event.target.value)}
               placeholder="spring-2026"
@@ -124,8 +126,7 @@ export function ContextsPage() {
             className="btn btn-primary"
             disabled={
               createContext.isPending ||
-              newName.trim().length < 3 ||
-              newName.trim().length > 20
+              nameProblem(newName, "Context name", false, CONTEXT_NAME_MAX) !== null
             }
           >
             {createContext.isPending ? <Spinner /> : "Create"}

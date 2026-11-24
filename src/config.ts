@@ -73,5 +73,3 @@ export const config = {
     authority: `${keycloakUrl}/realms/${keycloakRealm}`,
   },
 } as const;
-
-export type AppConfig = typeof config;

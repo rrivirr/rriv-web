@@ -15,6 +15,7 @@ import { QueryError } from "@/components/QueryError";
 import { Skeleton } from "@/components/Skeleton";
 import { Spinner } from "@/components/Spinner";
 import { RolesCard } from "@/components/RolesCard";
+import { OfficialConfigsCard } from "@/components/OfficialConfigsCard";
 import { formatRelative } from "@/lib/format";
 
 const PAGE_SIZE = 25;
@@ -261,6 +262,8 @@ export function AdminPage() {
       ) : null}
 
       <RolesCard />
+
+      <OfficialConfigsCard />
     </div>
   );
 }

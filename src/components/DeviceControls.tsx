@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
+import { savedApplyLink } from "@/api/library";
 import {
   useCreateDeviceLog,
   useDeleteDevice,
@@ -10,6 +11,7 @@ import {
 } from "@/api/mutations";
 import type { Device } from "@/api/types";
 import { Spinner } from "@/components/Spinner";
+import { nameProblem } from "@/lib/validation";
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : "Something went wrong.";
@@ -130,7 +132,7 @@ export function SaveSnapshotForm({
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const value = name.trim();
-    if (value.length < 3) return;
+    if (nameProblem(value, "Name")) return;
     save.mutate(
       { name: value, deviceId, contextId },
       { onSuccess: () => setName("") },
@@ -146,7 +148,8 @@ export function SaveSnapshotForm({
       <div className="flex gap-2">
         <input
           className="field"
-          placeholder="Snapshot name (3–20)"
+          placeholder="Snapshot name"
+          maxLength={20}
           value={name}
           onChange={(event) => setName(event.target.value)}
           aria-label="Snapshot name"
@@ -154,13 +157,23 @@ export function SaveSnapshotForm({
         <button
           type="submit"
           className="btn btn-ghost"
-          disabled={save.isPending || name.trim().length < 3}
+          disabled={save.isPending || nameProblem(name, "Name") !== null}
         >
           {save.isPending ? <Spinner /> : "Save snapshot"}
         </button>
       </div>
       {save.isSuccess ? (
-        <p className="text-xs text-emerald-600 dark:text-emerald-300">Saved.</p>
+        <p className="text-xs text-emerald-600 dark:text-emerald-300">
+          Saved.{" "}
+          {save.data?.id ? (
+            <Link to={savedApplyLink(save.data.id)} className="text-accent hover:underline">
+              Apply to a board
+            </Link>
+          ) : null}
+        </p>
+      ) : null}
+      {name.trim() && nameProblem(name, "Name") ? (
+        <p className="text-xs text-amber-600">{nameProblem(name, "Name")}</p>
       ) : null}
       {save.isError ? (
         <p className="text-xs text-red-500">{errorText(save.error)}</p>

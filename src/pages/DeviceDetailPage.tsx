@@ -15,7 +15,8 @@ import {
   useFirmwareHistory,
 } from "@/api/configs";
 import { useDevice } from "@/api/devices";
-import type { ConfigHistoryItem } from "@/api/types";
+import type { ActiveConfig, ConfigHistoryItem, ConfigSourceInfo } from "@/api/types";
+import { PublishPanel } from "@/components/library/PublishPanel";
 import { Badge } from "@/components/Badge";
 import { ConfigHistoryList } from "@/components/ConfigHistoryList";
 import {
@@ -44,6 +45,8 @@ const DeviceReadings = lazy(() =>
 export function DeviceDetailPage() {
   const { deviceId } = useParams<{ deviceId: string }>();
   const [showConfig, setShowConfig] = useState(false);
+  /** The action open under the current config: save it as a snapshot, or publish it. */
+  const [configAction, setConfigAction] = useState<"save" | "publish" | null>(null);
   const [historyPage, setHistoryPage] = useState(0);
   const [firmwarePage, setFirmwarePage] = useState(0);
   const [logsPage, setLogsPage] = useState(0);
@@ -72,6 +75,13 @@ export function DeviceDetailPage() {
   const firmware = useFirmwareHistory(
     device ? { deviceId: device.id } : {},
     { limit: PAGE_SIZE, offset: firmwarePage },
+  );
+  // The firmware the board runs now, recorded on configs published from it.
+  const [now] = useState(() => new Date().toISOString());
+  const currentFirmware = useFirmwareHistory(
+    device ? { deviceId: device.id } : {},
+    { asAt: now },
+    { enabled: configAction === "publish" },
   );
   const logs = useDeviceLogs(device?.serialNumber, {
     limit: PAGE_SIZE,
@@ -211,7 +221,45 @@ export function DeviceDetailPage() {
             <Skeleton className="h-12 rounded-xl" />
           </div>
         ) : activeConfig.data ? (
-          <ActiveConfigView data={activeConfig.data} />
+          <div className="space-y-4">
+            <ActiveConfigView data={activeConfig.data} />
+            {hasConfig(activeConfig.data) && device && contextId ? (
+              <div className="space-y-3">
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    aria-pressed={configAction === "save"}
+                    onClick={() => setConfigAction(configAction === "save" ? null : "save")}
+                  >
+                    Save as snapshot
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    aria-pressed={configAction === "publish"}
+                    onClick={() => setConfigAction(configAction === "publish" ? null : "publish")}
+                  >
+                    Publish to library
+                  </button>
+                </div>
+                {configAction === "save" ? (
+                  <div className="rounded-xl border border-border p-4">
+                    <SaveSnapshotForm deviceId={device.id} contextId={contextId} />
+                  </div>
+                ) : null}
+                {configAction === "publish" ? (
+                  <div className="rounded-xl border border-border p-4">
+                    <PublishPanel
+                      content={publishContent(activeConfig.data)}
+                      firmwareVersion={currentFirmware.data?.[0]?.version ?? null}
+                      onClose={() => setConfigAction(null)}
+                    />
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
         ) : null}
       </SectionCard>
 
@@ -356,15 +404,6 @@ export function DeviceDetailPage() {
         ) : null}
       </SectionCard>
 
-      {device && placement && contextId ? (
-        <SectionCard
-          title="Snapshots"
-          subtitle="Bookmark the current cloud config"
-        >
-          <SaveSnapshotForm deviceId={device.id} contextId={contextId} />
-        </SectionCard>
-      ) : null}
-
       {/* ------------------------------------------------------- Readings */}
       <SectionCard
         title="Readings"
@@ -392,18 +431,44 @@ export function DeviceDetailPage() {
   );
 }
 
-function ActiveConfigView({
-  data,
-}: {
-  data: {
-    dataloggerConfig: { config?: Record<string, unknown> } | null;
-    sensorConfig: {
-      id: string;
-      name: string;
-      config: Record<string, unknown>;
-    }[];
-  };
-}) {
+const hasConfig = (data: ActiveConfig) =>
+  data.dataloggerConfig?.config !== undefined && Object.keys(data.dataloggerConfig.config).length > 0 ||
+  data.sensorConfig.length > 0;
+
+const publishContent = (data: ActiveConfig) => ({
+  datalogger:
+    data.dataloggerConfig?.config && Object.keys(data.dataloggerConfig.config).length
+      ? data.dataloggerConfig.config
+      : null,
+  sensors: data.sensorConfig.map((sensor) => ({ name: sensor.name, config: sensor.config })),
+});
+
+/** "Based on ph-probe v3 · 2 settings changed · v4 available". */
+export function SourceLine({ source }: { source: ConfigSourceInfo | null | undefined }) {
+  if (!source) {
+    return <p className="text-xs text-fg-subtle">Not from the library</p>;
+  }
+  return (
+    <p className="text-xs text-fg-muted">
+      Based on{" "}
+      <Link to={`/library/${source.kind}/${source.libraryConfigId}`} className="text-accent hover:underline">
+        {source.name} v{source.version}
+      </Link>
+      {" · "}
+      {source.changedSettings === 0
+        ? "matches it"
+        : `${source.changedSettings} setting${source.changedSettings === 1 ? "" : "s"} changed`}
+      {source.updateAvailable && source.latestVersion ? (
+        <>
+          {" · "}
+          <span className="text-amber-600 dark:text-amber-300">v{source.latestVersion} available</span>
+        </>
+      ) : null}
+    </p>
+  );
+}
+
+function ActiveConfigView({ data }: { data: ActiveConfig }) {
   const hasDatalogger = data.dataloggerConfig?.config !== undefined;
   const hasSensors = data.sensorConfig.length > 0;
 
@@ -418,10 +483,13 @@ function ActiveConfigView({
   return (
     <div className="space-y-4">
       {hasDatalogger ? (
-        <JsonBlock
-          label="Datalogger"
-          value={data.dataloggerConfig?.config}
-        />
+        <div className="space-y-1">
+          <SourceLine source={data.dataloggerConfig?.source} />
+          <JsonBlock
+            label="Datalogger"
+            value={data.dataloggerConfig?.config}
+          />
+        </div>
       ) : null}
       {hasSensors ? (
         <div className="space-y-3">
@@ -429,11 +497,10 @@ function ActiveConfigView({
             Sensors ({data.sensorConfig.length})
           </p>
           {data.sensorConfig.map((sensor) => (
-            <JsonBlock
-              key={sensor.id}
-              label={sensor.name}
-              value={sensor.config}
-            />
+            <div key={sensor.id} className="space-y-1">
+              <SourceLine source={sensor.source} />
+              <JsonBlock label={sensor.name} value={sensor.config} />
+            </div>
           ))}
         </div>
       ) : null}

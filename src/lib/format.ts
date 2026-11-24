@@ -1,11 +1,5 @@
 /** Small formatting helpers shared by the dashboard. */
 
-const numberFormatter = new Intl.NumberFormat();
-
-export function formatCount(value: number | undefined): string {
-  return typeof value === "number" ? numberFormatter.format(value) : "—";
-}
-
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
 });

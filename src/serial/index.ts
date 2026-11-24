@@ -91,6 +91,23 @@ export {
   parseFirmwareImage,
 } from "./firmware";
 export type { FirmwareImage } from "./firmware";
+export {
+  DATALOGGER_TEXT_LIMITS,
+  MAX_COMMAND_BYTES,
+  planApply,
+  readBoardConfig,
+  runApplyPlan,
+} from "./applyPlan";
+export type {
+  ApplyPlan,
+  ApplySource,
+  ApplyStep,
+  BoardConfig,
+  ConfigSensor,
+  SettingChange,
+  SkippedSetting,
+  StepResult,
+} from "./applyPlan";
 export { buildDiagnostics, diagnosticsFilename } from "./diagnostics";
 export type { Diagnostics } from "./diagnostics";
 export { useSerialConnection } from "./useSerialConnection";

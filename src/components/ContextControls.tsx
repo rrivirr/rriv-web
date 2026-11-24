@@ -14,6 +14,7 @@ import { Badge } from "@/components/Badge";
 import { SectionCard } from "@/components/SectionCard";
 import { Skeleton } from "@/components/Skeleton";
 import { Spinner } from "@/components/Spinner";
+import { CONTEXT_NAME_MAX, nameProblem } from "@/lib/validation";
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : "Something went wrong.";
@@ -39,7 +40,7 @@ export function ContextHeaderActions({
   function onRename(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const value = name.trim();
-    if (value.length < 3 || value.length > 20 || value === context.name) return;
+    if (nameProblem(value, "Context name", false, CONTEXT_NAME_MAX) || value === context.name) return;
     update.mutate(
       { id: context.id, body: { name: value } },
       { onSuccess: () => setRenaming(false) },
@@ -51,15 +52,19 @@ export function ContextHeaderActions({
       {renaming ? (
         <form className="flex items-center gap-2" onSubmit={onRename}>
           <input
-            className="field w-44"
+            className="field w-56"
             value={name}
+            maxLength={CONTEXT_NAME_MAX}
             onChange={(event) => setName(event.target.value)}
             aria-label="Context name"
           />
           <button
             type="submit"
             className="btn btn-primary"
-            disabled={update.isPending}
+            disabled={
+              update.isPending ||
+              nameProblem(name, "Context name", false, CONTEXT_NAME_MAX) !== null
+            }
           >
             Save
           </button>

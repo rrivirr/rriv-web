@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError } from "@/api/client";
 import {
+  type ConfigSource,
   bindErrorMessage,
   dataloggerConfigUpload,
   pickDriver,
@@ -10,6 +11,7 @@ import {
   useCreateFirmwareEntry,
   useCreateSensorConfig,
   useDataloggerDrivers,
+  useDeactivateSensorConfig,
   useDeviceBySerial,
   useProvisionDevice,
   useRegisterEui,
@@ -111,6 +113,7 @@ export function useBoardLink(serial: SerialConnection) {
   const registerEui = useRegisterEui();
   const createSensorConfig = useCreateSensorConfig();
   const createDataloggerConfig = useCreateDataloggerConfig();
+  const deactivateSensorConfig = useDeactivateSensorConfig();
   const { mutateAsync: createFirmwareEntry } = useCreateFirmwareEntry();
   const { mutate: createDeviceLog } = useCreateDeviceLog();
   /** `undefined` until read this connection; `null` on firmware without a start-up log. */
@@ -263,27 +266,49 @@ export function useBoardLink(serial: SerialConnection) {
     reason: "Link this board to a context to sync config to the cloud.",
   };
 
+  /**
+   * Upload what the board reports for a sensor. `source` is the library
+   * version it was just applied from (`null`: applied from something that
+   * isn't a library version, which clears it); leave it out for hand edits.
+   */
   const syncSensor = async (
     applied: SerialRecord,
     to: Placement | null = target,
+    source?: ConfigSource | null,
   ): Promise<SyncOutcome> => {
       if (!to) return notLinked;
       try {
         const drivers = sensorDrivers.data ?? (await sensorDrivers.refetch()).data;
         const driver = pickDriver(drivers);
         if (!driver) return { kind: "failed", error: "No sensor drivers found; contact an admin." };
-        await createSensorConfig.mutateAsync(
-          sensorConfigUpload(applied, { ...to, driverId: driver.id }),
-        );
+        await createSensorConfig.mutateAsync({
+          ...sensorConfigUpload(applied, { ...to, driverId: driver.id }),
+          ...(source !== undefined && { source }),
+        });
         return { kind: "synced" };
       } catch (cause) {
         return { kind: "failed", error: errorText(cause) };
       }
   };
 
+  /** A sensor was removed from the board: end its config in the cloud. */
+  const syncSensorRemoval = async (
+    id: string,
+    to: Placement | null = target,
+  ): Promise<SyncOutcome> => {
+    if (!to) return notLinked;
+    try {
+      await deactivateSensorConfig.mutateAsync({ name: id, ...to });
+      return { kind: "synced" };
+    } catch (cause) {
+      return { kind: "failed", error: errorText(cause) };
+    }
+  };
+
   const syncDatalogger = async (
     applied: SerialRecord,
     to: Placement | null = target,
+    source?: ConfigSource | null,
   ): Promise<SyncOutcome> => {
       if (!to) return notLinked;
       try {
@@ -292,9 +317,10 @@ export function useBoardLink(serial: SerialConnection) {
         if (!driver) {
           return { kind: "failed", error: "No datalogger drivers found; contact an admin." };
         }
-        await createDataloggerConfig.mutateAsync(
-          dataloggerConfigUpload(applied, { ...to, driverId: driver.id }),
-        );
+        await createDataloggerConfig.mutateAsync({
+          ...dataloggerConfigUpload(applied, { ...to, driverId: driver.id }),
+          ...(source !== undefined && { source }),
+        });
         return { kind: "synced" };
       } catch (cause) {
         return { kind: "failed", error: errorText(cause) };
@@ -480,6 +506,7 @@ export function useBoardLink(serial: SerialConnection) {
     sensorDrivers,
     dataloggerDrivers,
     syncSensor,
+    syncSensorRemoval,
     syncDatalogger,
     owned,
     cloudError,

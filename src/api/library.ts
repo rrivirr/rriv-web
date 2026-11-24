@@ -1,10 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
+import type { ApplySource } from "@/serial";
 import { useApiClient } from "./client";
 import type {
   LibraryConfigDetail,
   LibraryConfigSummary,
   LibraryConfigVersion,
   LibraryCreator,
+  LibrarySnapshotRef,
 } from "./types";
 
 /**
@@ -35,6 +37,7 @@ export interface LibraryFilters {
   name?: string;
   author?: string;
   isPublic?: boolean;
+  isOfficial?: boolean;
   limit?: number;
   offset?: number;
   order?: "asc" | "desc";
@@ -54,6 +57,9 @@ function buildQuery(filters: LibraryFilters): string {
   setString("author", filters.author);
   if (filters.isPublic !== undefined) {
     params.set("isPublic", String(filters.isPublic));
+  }
+  if (filters.isOfficial !== undefined) {
+    params.set("isOfficial", String(filters.isOfficial));
   }
   if (filters.limit !== undefined) params.set("limit", String(filters.limit));
   if (filters.offset !== undefined) params.set("offset", String(filters.offset));
@@ -126,4 +132,74 @@ export function libraryVersions(
     detail.SystemLibraryConfigVersion ??
     []
   );
+}
+
+/**
+ * What a library version would apply to a board. `sensorId` is the id the
+ * sensor takes on the board (sensor kind only); it defaults to the saved
+ * config's name, which is the id it had on the board it was saved from.
+ * `null` when the version has no config payload.
+ */
+export function applySourceFromVersion(
+  kind: LibraryKind,
+  version: LibraryConfigVersion,
+  sensorId?: string,
+): ApplySource | null {
+  if (kind === "system") {
+    return version.ConfigSnapshot ? applySourceFromSnapshot(version.ConfigSnapshot) : null;
+  }
+  if (kind === "datalogger") {
+    const config = version.DataloggerConfig;
+    return config ? { kind: "datalogger", datalogger: config.config } : null;
+  }
+  const config = version.SensorConfig;
+  return config
+    ? { kind: "sensor", sensor: { id: sensorId ?? config.name, config: config.config } }
+    : null;
+}
+
+/**
+ * A whole-board config (a system library version's snapshot, or a saved
+ * snapshot): the board ends up with exactly this datalogger and these sensors.
+ */
+export function applySourceFromSnapshot(
+  snapshot: Pick<LibrarySnapshotRef, "DataloggerConfig" | "SensorConfig">,
+): ApplySource {
+  return {
+    kind: "system",
+    datalogger: snapshot.DataloggerConfig?.[0]?.config ?? null,
+    sensors: (snapshot.SensorConfig ?? []).map((sensor) => ({
+      id: sensor.name,
+      config: sensor.config,
+    })),
+  };
+}
+
+/** What can be applied to a board: a library kind, or one of your saved snapshots. */
+export type ApplyKind = LibraryKind | "saved";
+
+/** What `/connect?apply=…` asks to open. Saved snapshots have no versions. */
+export type ApplyRequest =
+  | { kind: LibraryKind; id: string; version: number }
+  | { kind: "saved"; id: string; version: null };
+
+/** The `/connect` link that opens a library version ready to apply to a board. */
+export function applyLink(kind: LibraryKind, id: string, version: number): string {
+  return `/connect?${new URLSearchParams({ apply: `${kind}:${id}:${version}` })}`;
+}
+
+/** The `/connect` link that opens one of your saved snapshots ready to apply. */
+export function savedApplyLink(id: string): string {
+  return `/connect?${new URLSearchParams({ apply: `saved:${id}` })}`;
+}
+
+/** Parse `?apply=<kind>:<id>:<version>` or `?apply=saved:<id>`; `null` if it isn't one. */
+export function parseApplyParam(value: string | null): ApplyRequest | null {
+  const [kind, id, version] = value?.split(":") ?? [];
+  if (!kind || !id) return null;
+  if (kind === "saved") return version === undefined ? { kind, id, version: null } : null;
+  const number = Number(version);
+  if (!Number.isInteger(number) || number < 1) return null;
+  if (!(LIBRARY_KINDS as readonly string[]).includes(kind)) return null;
+  return { kind: kind as LibraryKind, id, version: number };
 }

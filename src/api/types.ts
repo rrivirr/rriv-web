@@ -53,13 +53,33 @@ export interface DeviceContext {
   configSnapshotId: string;
 }
 
+/**
+ * The library version a device's config came from (`null`: set by hand, from
+ * a saved snapshot, or before sources were recorded).
+ */
+export interface ConfigSourceInfo {
+  kind: "sensor" | "datalogger" | "system";
+  versionId: string;
+  version: number;
+  libraryConfigId: string;
+  name: string;
+  latestVersion: number | null;
+  updateAvailable: boolean;
+  /** Settings that differ from that version. */
+  changedSettings: number;
+}
+
 /** `GET /configSnapshot/active` — the config currently applied to a device+context. */
 export interface ActiveConfig {
-  dataloggerConfig: { config?: Record<string, unknown> } | null;
+  dataloggerConfig: {
+    config?: Record<string, unknown>;
+    source?: ConfigSourceInfo | null;
+  } | null;
   sensorConfig: {
     id: string;
     name: string;
     config: Record<string, unknown>;
+    source?: ConfigSourceInfo | null;
   }[];
 }
 
@@ -121,6 +141,8 @@ export interface LibraryConfigSummary {
   name: string;
   description?: string | null;
   isPublic?: boolean;
+  /** An official RRIV config (always public; set by admins). */
+  isOfficial?: boolean;
   creatorId?: string;
   createdAt: string;
   Creator?: LibraryCreator;
@@ -146,7 +168,11 @@ export interface LibrarySnapshotRef {
 
 /** One published version of a library config. */
 export interface LibraryConfigVersion {
+  /** The version row's id; what a device config records as its source. */
+  id?: string;
   version: number;
+  /** Firmware the config was saved with, when the publisher recorded it. */
+  firmwareVersion?: string | null;
   description?: string | null;
   Creator?: LibraryCreator;
   creator?: LibraryCreator;
@@ -157,6 +183,8 @@ export interface LibraryConfigVersion {
 
 /** Detail returned by `GET /{kind}/libraryConfig/:id`. */
 export interface LibraryConfigDetail extends LibraryConfigSummary {
+  /** The caller owns it (edit, archive, publish versions). */
+  isMine?: boolean;
   SensorLibraryConfigVersion?: LibraryConfigVersion[];
   DataloggerLibraryConfigVersion?: LibraryConfigVersion[];
   SystemLibraryConfigVersion?: LibraryConfigVersion[];

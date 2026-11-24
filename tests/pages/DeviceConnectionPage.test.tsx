@@ -2,7 +2,7 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Device } from "@/api/types";
+import type { Device, LibraryConfigDetail } from "@/api/types";
 import { DeviceConnectionPage } from "@/pages/DeviceConnectionPage";
 import { renderWithProviders } from "../helpers/render";
 import { server } from "../helpers/server";
@@ -72,6 +72,8 @@ function makeBoard(initial: { serialNumber?: string } = {}) {
     crashNext: false,
     /** `board get startup`; `null` answers like firmware without a start-up log. */
     startup: null as Command | null,
+    /** Commands to answer with an error, as the firmware does for a value it rejects. */
+    refuse: null as ((command: Command) => boolean) | null,
   };
   const respond = (command: Command): Command | string | null => {
     const { object, action, id } = command;
@@ -79,6 +81,9 @@ function makeBoard(initial: { serialNumber?: string } = {}) {
       state.crashNext = false;
       setTimeout(() => board.unplug(), 20);
       return '{"status":"panic","message":"heap exhausted"}';
+    }
+    if (state.refuse?.(command)) {
+      return { status: "error", message: "sensor type not found", error: "" };
     }
     if (object === "device" && action === "get") {
       return { serial_number: state.serialNumber, uid: UID, codes: [] };
@@ -1060,12 +1065,17 @@ describe("DeviceConnectionPage", () => {
     installSerial([], board.port);
     const user = userEvent.setup();
     const synced = vi.fn();
+    const removed = vi.fn();
     server.use(
       ...commonHandlers(),
       http.get(`${API}/device`, () => HttpResponse.json([device])),
       http.post(`${API}/sensor/config`, async ({ request }) => {
         synced(await request.json());
         return new HttpResponse(null, { status: 201 });
+      }),
+      http.post(`${API}/sensor/config/deactivate`, async ({ request }) => {
+        removed(await request.json());
+        return HttpResponse.json(null);
       }),
     );
 
@@ -1096,6 +1106,308 @@ describe("DeviceConnectionPage", () => {
     await user.click(screen.getByRole("button", { name: "Remove sensor ph01" }));
     await user.click(screen.getByRole("button", { name: "Remove?" }));
     await waitFor(() => expect(board.state.sensors.has("ph01")).toBe(false));
+    // The removal reaches the cloud, and hand edits carry no library source.
+    expect(await screen.findByText(/Removal of sensor ph01 applied to the board and synced/)).toBeInTheDocument();
+    expect(removed).toHaveBeenCalledWith(expect.objectContaining({ name: "ph01", deviceId: device.id }));
+    for (const [body] of synced.mock.calls) expect(body).not.toHaveProperty("source");
+  });
+
+  describe("applying a library config", () => {
+    const systemLibrary: LibraryConfigDetail = {
+      id: "lib1",
+      name: "well-standard",
+      isPublic: true,
+      createdAt: "2026-01-01T00:00:00Z",
+      SystemLibraryConfigVersion: [
+        {
+          id: "slv2",
+          version: 2,
+          firmwareVersion: "1.4.0",
+          ConfigSnapshot: {
+            id: "snap2",
+            name: "well-standard",
+            DataloggerConfig: [
+              { id: "dc1", config: { object: "datalogger", site_name: "SITE-B", mode: "field" } },
+            ],
+            SensorConfig: [
+              { id: "sc1", name: "temp01", config: { object: "sensor", type: "ds18b20", wait_time: 9 } },
+              { id: "sc2", name: "co2", config: { object: "sensor", type: "k30_co2", wait_time: 2 } },
+            ],
+          },
+        },
+        {
+          version: 1,
+          ConfigSnapshot: { id: "snap1", name: "well-standard", DataloggerConfig: [], SensorConfig: [] },
+        },
+      ],
+    };
+
+    /** A linked board with an extra sensor, opened from a library link; returns the upload spies. */
+    async function openFromLink(board: ReturnType<typeof makeBoard>, library = systemLibrary) {
+      board.state.sensors.set("ph01", { id: "ph01", type: "ph", wait_time: 1 });
+      installSerial([], board.port);
+      const user = userEvent.setup();
+      const dataloggerSynced = vi.fn();
+      const sensorSynced = vi.fn();
+      const sensorRemoved = vi.fn();
+      server.use(
+        ...commonHandlers(),
+        http.get(`${API}/device`, () => HttpResponse.json([device])),
+        http.get(`${API}/configSnapshot/libraryConfig`, () => HttpResponse.json([library])),
+        http.get(`${API}/configSnapshot/libraryConfig/lib1`, () => HttpResponse.json(library)),
+        http.post(`${API}/sensor/config/deactivate`, async ({ request }) => {
+          sensorRemoved(await request.json());
+          return HttpResponse.json(null);
+        }),
+        http.post(`${API}/datalogger/config`, async ({ request }) => {
+          dataloggerSynced(await request.json());
+          return new HttpResponse(null, { status: 201 });
+        }),
+        http.post(`${API}/sensor/config`, async ({ request }) => {
+          sensorSynced(await request.json());
+          return new HttpResponse(null, { status: 201 });
+        }),
+      );
+      renderWithProviders(<DeviceConnectionPage />, { route: "/connect?apply=system:lib1:2" });
+      await connect(user);
+      expect(await screen.findByRole("tab", { name: "From library" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+      await waitFor(() =>
+        expect(screen.getByLabelText("Version")).toHaveDisplayValue(/v2 \(latest\)/),
+      );
+      return { user, dataloggerSynced, sensorSynced, sensorRemoved };
+    }
+
+    it("opens a library link ready to apply, previews it, and replaces the board's config", async () => {
+      const board = makeBoard();
+      const { user, dataloggerSynced, sensorSynced, sensorRemoved } = await openFromLink(board);
+      // Saved with other firmware than the board's (9.9.9): a warning, not a block.
+      expect(screen.getByText(/Saved with firmware 1\.4\.0; this board runs 9\.9\.9/)).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Review changes" }));
+      const planned = await screen.findByRole("list", { name: "Planned changes" });
+      const steps = within(planned).getAllByRole("listitem");
+      expect(steps.map((step) => step.textContent)).toEqual([
+        expect.stringContaining("Remove sensor ph01 (ph); it isn't in this config"),
+        expect.stringContaining("Datalogger: change 1 setting"),
+        expect.stringContaining("Sensor temp01: change 1 setting"),
+        expect.stringContaining("Add sensor co2 (k30_co2)"),
+      ]);
+      // Field mode is never sent from the library.
+      expect(screen.getByText(/applying field mode would stop the board answering/)).toBeInTheDocument();
+      expect(board.state.sensors.has("ph01")).toBe(true);
+
+      await user.click(screen.getByRole("button", { name: "Apply 4 changes" }));
+      expect(await screen.findByText(/Applied to the board\. The board's new config is synced/)).toBeInTheDocument();
+
+      expect(board.state.sensors.has("ph01")).toBe(false);
+      expect(board.state.datalogger.site_name).toBe("SITE-B");
+      expect(board.state.datalogger.mode).toBe("interactive");
+      expect(board.state.sensors.get("co2")).toMatchObject({ type: "k30_co2", wait_time: 2 });
+      expect(board.written).toContainEqual({ object: "sensor", action: "set", id: "temp01", wait_time: 9 });
+      expect(dataloggerSynced).toHaveBeenCalledWith(
+        expect.objectContaining({ config: expect.objectContaining({ site_name: "SITE-B" }) }),
+      );
+      expect(sensorSynced.mock.calls.map(([body]) => (body as { name: string }).name).sort()).toEqual([
+        "co2",
+        "temp01",
+      ]);
+      // Each upload records the library version it came from.
+      const source = { kind: "system", versionId: "slv2" };
+      expect(dataloggerSynced).toHaveBeenCalledWith(expect.objectContaining({ source }));
+      for (const [body] of sensorSynced.mock.calls) expect(body).toMatchObject({ source });
+      // The sensor the config doesn't have is ended in the cloud.
+      expect(sensorRemoved).toHaveBeenCalledTimes(1);
+      expect(sensorRemoved).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "ph01", deviceId: device.id }),
+      );
+    });
+
+    it("has no firmware warning when the board runs the saved firmware", async () => {
+      const board = makeBoard();
+      const [latest, ...older] = systemLibrary.SystemLibraryConfigVersion ?? [];
+      await openFromLink(board, {
+        ...systemLibrary,
+        SystemLibraryConfigVersion: [{ ...latest, firmwareVersion: "9.9.9" }, ...older],
+      });
+      expect(screen.queryByText(/Saved with firmware/)).not.toBeInTheDocument();
+    });
+
+    it("stops at a failed step and retries only the rest", async () => {
+      const board = makeBoard();
+      const { user, sensorSynced } = await openFromLink(board);
+      // The board refuses to add the new sensor the first time.
+      board.state.refuse = (command) => command.object === "sensor" && command.id === "co2";
+
+      await user.click(screen.getByRole("button", { name: "Review changes" }));
+      await user.click(await screen.findByRole("button", { name: "Apply 4 changes" }));
+      expect(await screen.findByText(/The apply stopped part-way/)).toBeInTheDocument();
+      expect(screen.getByText("Failed")).toBeInTheDocument();
+      expect(screen.getByText("sensor type not found")).toBeInTheDocument();
+      // What did reach the board is still uploaded.
+      expect(sensorSynced).toHaveBeenCalledWith(expect.objectContaining({ name: "temp01" }));
+      expect(board.state.sensors.has("co2")).toBe(false);
+
+      board.state.refuse = null;
+      const removes = board.written.filter((command) => command.action === "remove").length;
+      await user.click(screen.getByRole("button", { name: "Retry the rest" }));
+      expect(await screen.findByText(/Applied to the board\. The board's new config is synced/)).toBeInTheDocument();
+      expect(board.state.sensors.get("co2")).toMatchObject({ type: "k30_co2" });
+      // The steps that were done aren't sent again.
+      expect(board.written.filter((command) => command.action === "remove")).toHaveLength(removes);
+    });
+
+    it("applies a saved snapshot from its link, clearing the library source", async () => {
+      const board = makeBoard();
+      board.state.sensors.set("ph01", { id: "ph01", type: "ph", wait_time: 1 });
+      installSerial([], board.port);
+      const user = userEvent.setup();
+      const dataloggerSynced = vi.fn();
+      const sensorSynced = vi.fn();
+      const sensorRemoved = vi.fn();
+      const snapshot = {
+        id: "snap1",
+        name: "before-trip",
+        DataloggerConfig: [{ id: "d1", config: { object: "datalogger", site_name: "SITE-C" } }],
+        SensorConfig: [{ id: "s1", name: "temp01", config: { object: "sensor", type: "ds18b20", wait_time: 4 } }],
+      };
+      server.use(
+        ...commonHandlers(),
+        http.get(`${API}/device`, () => HttpResponse.json([device])),
+        http.get(`${API}/configSnapshot`, () => HttpResponse.json([snapshot])),
+        http.post(`${API}/datalogger/config`, async ({ request }) => {
+          dataloggerSynced(await request.json());
+          return new HttpResponse(null, { status: 201 });
+        }),
+        http.post(`${API}/sensor/config`, async ({ request }) => {
+          sensorSynced(await request.json());
+          return new HttpResponse(null, { status: 201 });
+        }),
+        http.post(`${API}/sensor/config/deactivate`, async ({ request }) => {
+          sensorRemoved(await request.json());
+          return HttpResponse.json(null);
+        }),
+      );
+      renderWithProviders(<DeviceConnectionPage />, { route: "/connect?apply=saved:snap1" });
+      await connect(user);
+      expect(await screen.findByLabelText("Config type")).toHaveDisplayValue(/Saved config/);
+      await waitFor(() => expect(screen.getByLabelText("Saved config")).toHaveDisplayValue("before-trip"));
+      expect(screen.queryByLabelText("Version")).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "View in library" })).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Review changes" }));
+      const planned = await screen.findByRole("list", { name: "Planned changes" });
+      expect(within(planned).getByText(/Remove sensor ph01/)).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: /^Apply \d+ changes?$/ }));
+      expect(await screen.findByText(/Applied to the board\. The board's new config is synced/)).toBeInTheDocument();
+
+      expect(board.state.sensors.has("ph01")).toBe(false);
+      expect(board.state.datalogger.site_name).toBe("SITE-C");
+      // Not a library version: every upload clears the source.
+      expect(dataloggerSynced).toHaveBeenCalledWith(expect.objectContaining({ source: null }));
+      for (const [body] of sensorSynced.mock.calls) expect(body).toMatchObject({ source: null });
+      expect(sensorRemoved).toHaveBeenCalledWith(expect.objectContaining({ name: "ph01" }));
+    });
+
+    const sourceInfo = (versionId: string) => ({
+      kind: "system",
+      versionId,
+      version: 2,
+      libraryConfigId: "lib1",
+      name: "well-standard",
+      latestVersion: 2,
+      updateAvailable: false,
+      changedSettings: 0,
+    });
+    /** The cloud's record for the board, every object recorded as `versionId` (or none). */
+    const activeHandler = (record: () => string | null) =>
+      http.get(`${API}/configSnapshot/active`, () =>
+        HttpResponse.json({
+          dataloggerConfig: {
+            config: { site_name: "SITE-B" },
+            source: record() ? sourceInfo(record()!) : null,
+          },
+          sensorConfig: ["temp01", "co2"].map((name) => ({
+            id: name,
+            name,
+            config: {},
+            source: record() ? sourceInfo(record()!) : null,
+          })),
+        }),
+      );
+
+    /** A board that already matches v2 exactly. */
+    const matchingBoard = () => {
+      const board = makeBoard();
+      board.state.datalogger.site_name = "SITE-B";
+      board.state.sensors.set("temp01", { id: "temp01", type: "ds18b20", wait_time: 9 });
+      board.state.sensors.set("co2", { id: "co2", type: "k30_co2", wait_time: 2 });
+      return board;
+    };
+
+    it("records every object a complete apply covers, matching ones too", async () => {
+      const board = makeBoard();
+      // The datalogger already matches v2; the sensors don't.
+      board.state.datalogger.site_name = "SITE-B";
+      const { user, dataloggerSynced, sensorSynced } = await openFromLink(board);
+
+      await user.click(screen.getByRole("button", { name: "Review changes" }));
+      const planned = await screen.findByRole("list", { name: "Planned changes" });
+      expect(within(planned).queryByText(/^Datalogger/)).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: /^Apply \d+ changes?$/ }));
+      expect(await screen.findByText(/Applied to the board\. The board's new config is synced/)).toBeInTheDocument();
+
+      const source = { kind: "system", versionId: "slv2" };
+      expect(dataloggerSynced).toHaveBeenCalledWith(expect.objectContaining({ source }));
+      expect(sensorSynced.mock.calls.map(([body]) => (body as { name: string }).name).sort()).toEqual([
+        "co2",
+        "temp01",
+      ]);
+    });
+
+    it("offers to record a matching board as on the version, then says it's applied", async () => {
+      const board = matchingBoard();
+      let recorded: string | null = null;
+      server.use(activeHandler(() => recorded));
+      const { user, dataloggerSynced, sensorSynced } = await openFromLink(board);
+      board.state.sensors.delete("ph01");
+      server.use(
+        http.post(`${API}/datalogger/config`, async ({ request }) => {
+          dataloggerSynced(await request.json());
+          recorded = "slv2";
+          return new HttpResponse(null, { status: 201 });
+        }),
+      );
+
+      await user.click(screen.getByRole("button", { name: "Review changes" }));
+      expect(await screen.findByText(/already matches this config/)).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /^Apply \d/ })).not.toBeInTheDocument();
+      const writes = board.written.length;
+
+      await user.click(await screen.findByRole("button", { name: "Record as applied" }));
+      expect(await screen.findByText("v2 is already applied to this board. Nothing to send.")).toBeInTheDocument();
+      const source = { kind: "system", versionId: "slv2" };
+      expect(dataloggerSynced).toHaveBeenCalledWith(expect.objectContaining({ source }));
+      expect(sensorSynced.mock.calls.map(([body]) => (body as { name: string }).name).sort()).toEqual([
+        "co2",
+        "temp01",
+      ]);
+      // Nothing was set on the board; it was only read back.
+      expect(board.written.slice(writes).every((command) => command.action !== "set" && command.action !== "remove")).toBe(true);
+    });
+
+    it("says the version is already applied when the cloud records it", async () => {
+      const board = matchingBoard();
+      server.use(activeHandler(() => "slv2"));
+      const { user } = await openFromLink(board);
+      board.state.sensors.delete("ph01");
+
+      await user.click(screen.getByRole("button", { name: "Review changes" }));
+      expect(await screen.findByText("v2 is already applied to this board. Nothing to send.")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Record as applied" })).not.toBeInTheDocument();
+    });
   });
 
   it("streams live frames and downloads them in the CLI's log format", async () => {

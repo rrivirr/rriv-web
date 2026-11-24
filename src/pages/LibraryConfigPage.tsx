@@ -1,20 +1,24 @@
-import { Link, useParams } from "react-router";
+import { useState } from "react";
+import { Link, useNavigate, useParams } from "react-router";
 import { IconAlert, IconArrowLeft, IconLayers } from "@/assets/Icons";
 import { ApiError } from "@/api/client";
 import {
   LIBRARY_KINDS,
+  applyLink,
   creatorName,
   libraryVersions,
   useLibraryConfig,
 } from "@/api/library";
 import type { LibraryKind } from "@/api/library";
-import type { LibraryConfigVersion } from "@/api/types";
+import { useArchiveLibraryConfig, useUpdateLibraryConfig } from "@/api/libraryManage";
+import type { LibraryConfigDetail, LibraryConfigVersion } from "@/api/types";
 import { Badge } from "@/components/Badge";
 import { EmptyState } from "@/components/EmptyState";
 import { JsonBlock } from "@/components/JsonBlock";
 import { SectionCard } from "@/components/SectionCard";
 import { Skeleton } from "@/components/Skeleton";
 import { formatDate } from "@/lib/format";
+import { nameProblem } from "@/lib/validation";
 
 const KIND_LABELS: Record<LibraryKind, string> = {
   sensor: "Sensor config",
@@ -84,6 +88,7 @@ export function LibraryConfigPage() {
               <h1 className="text-2xl font-semibold tracking-tight text-fg">
                 {detail.name}
               </h1>
+              {detail.isOfficial ? <Badge tone="brand">Official RRIV</Badge> : null}
               <Badge tone={detail.isPublic ? "brand" : "neutral"}>
                 {detail.isPublic ? "Public" : "Private"}
               </Badge>
@@ -106,6 +111,8 @@ export function LibraryConfigPage() {
             </dl>
           </header>
 
+          {detail.isMine ? <OwnerControls kind={kind} detail={detail} /> : null}
+
           {/* ---------------------------------------------------- Versions */}
           <SectionCard
             title="Versions"
@@ -125,6 +132,7 @@ export function LibraryConfigPage() {
                     key={version.version}
                     version={version}
                     kind={kind}
+                    configId={detail.id}
                     defaultOpen={index === 0}
                   />
                 ))}
@@ -151,10 +159,12 @@ function MetaCell({ label, value }: { label: string; value: string }) {
 function VersionItem({
   version,
   kind,
+  configId,
   defaultOpen,
 }: {
   version: LibraryConfigVersion;
   kind: LibraryKind;
+  configId: string;
   defaultOpen: boolean;
 }) {
   return (
@@ -168,14 +178,36 @@ function VersionItem({
           <span className="truncate text-sm text-fg">
             {version.description || "No description"}
           </span>
+          {version.firmwareVersion ? (
+            <span className="shrink-0 text-xs text-fg-subtle">firmware {version.firmwareVersion}</span>
+          ) : null}
         </span>
         <span className="shrink-0 text-xs text-fg-subtle">
           {creatorName(version)}
         </span>
       </summary>
 
-      <div className="border-t border-border px-4 py-4">
+      <div className="space-y-4 border-t border-border px-4 py-4">
         <VersionBody version={version} kind={kind} />
+        <div className="flex flex-wrap items-center gap-3 border-t border-border pt-3">
+          <Link
+            to={applyLink(kind, configId, version.version)}
+            className="btn btn-ghost px-3 py-1.5"
+            aria-label={`Apply v${version.version} to a device`}
+          >
+            Apply to a device
+          </Link>
+          <Link
+            to={`/library/new?copy=${kind}:${configId}:${version.version}`}
+            className="btn btn-ghost px-3 py-1.5"
+            aria-label={`Copy v${version.version} to a new config`}
+          >
+            Copy to a new config
+          </Link>
+          <span className="text-xs text-fg-subtle">
+            Connect a board over USB, then review the changes before they're sent.
+          </span>
+        </div>
       </div>
     </details>
   );
@@ -261,5 +293,118 @@ function DetailSkeleton() {
         <Skeleton className="h-12 rounded-xl" />
       </div>
     </div>
+  );
+}
+
+/** The owner's controls: rename, describe, public/private, archive. */
+function OwnerControls({ kind, detail }: { kind: LibraryKind; detail: LibraryConfigDetail }) {
+  const navigate = useNavigate();
+  const update = useUpdateLibraryConfig();
+  const archive = useArchiveLibraryConfig();
+  const [editing, setEditing] = useState(false);
+  const [confirmArchive, setConfirmArchive] = useState(false);
+  const [name, setName] = useState(detail.name);
+  const [description, setDescription] = useState(detail.description ?? "");
+  const error = update.error ?? archive.error;
+  const editProblems = [nameProblem(name, "Name"), nameProblem(description, "Description", true)].filter(
+    (problem): problem is string => problem !== null,
+  );
+
+  return (
+    <SectionCard
+      title="Manage"
+      subtitle="Only you can change this config. Publish new versions from a device's page or a saved config."
+    >
+      <div className="space-y-3">
+        {editing ? (
+          <form
+            className="grid gap-3 sm:grid-cols-[1fr_1fr_auto_auto]"
+            onSubmit={(event) => {
+              event.preventDefault();
+              update.mutate(
+                {
+                  kind,
+                  id: detail.id,
+                  changes: { name: name.trim(), description: description.trim() || null },
+                },
+                { onSuccess: () => setEditing(false) },
+              );
+            }}
+          >
+            <input
+              className="field"
+              aria-label="Name"
+              value={name}
+              maxLength={20}
+              onChange={(event) => setName(event.target.value)}
+            />
+            <input
+              className="field"
+              aria-label="Description"
+              placeholder="Description (optional)"
+              value={description}
+              maxLength={20}
+              onChange={(event) => setDescription(event.target.value)}
+            />
+            <button type="submit" className="btn btn-primary" disabled={update.isPending || editProblems.length > 0}>
+              Save
+            </button>
+            <button type="button" className="btn btn-ghost" onClick={() => setEditing(false)}>
+              Cancel
+            </button>
+            {editProblems.map((problem) => (
+              <p key={problem} className="text-xs text-amber-600 sm:col-span-4">
+                {problem}
+              </p>
+            ))}
+          </form>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="btn btn-ghost" onClick={() => setEditing(true)}>
+              Edit name and description
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              disabled={update.isPending || (detail.isOfficial && detail.isPublic)}
+              title={detail.isOfficial ? "Official configs stay public; an admin can unmark it." : undefined}
+              onClick={() => update.mutate({ kind, id: detail.id, changes: { isPublic: !detail.isPublic } })}
+            >
+              {detail.isPublic ? "Make private" : "Make public"}
+            </button>
+            {confirmArchive ? (
+              <>
+                <button
+                  type="button"
+                  className="btn btn-ghost text-red-500"
+                  disabled={archive.isPending}
+                  onClick={() =>
+                    archive.mutate({ kind, id: detail.id }, { onSuccess: () => navigate("/library") })
+                  }
+                >
+                  Archive it
+                </button>
+                <button type="button" className="btn btn-ghost" onClick={() => setConfirmArchive(false)}>
+                  Keep
+                </button>
+              </>
+            ) : (
+              <button type="button" className="btn btn-ghost text-red-500" onClick={() => setConfirmArchive(true)}>
+                Archive
+              </button>
+            )}
+          </div>
+        )}
+        {confirmArchive ? (
+          <p className="text-xs text-fg-subtle">
+            Archived configs are hidden from the library. Devices set from it keep their settings.
+          </p>
+        ) : null}
+        {detail.isOfficial ? (
+          <p className="text-xs text-fg-subtle">This is an official RRIV config, so it stays public.</p>
+        ) : null}
+        {error ? <p className="text-xs text-red-500">{error.message}</p> : null}
+      </div>
+    </SectionCard>
   );
 }

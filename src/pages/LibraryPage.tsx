@@ -15,6 +15,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { Pager } from "@/components/Pager";
 import { SectionCard } from "@/components/SectionCard";
 import { Skeleton } from "@/components/Skeleton";
+import { SavedSnapshotsPanel } from "@/components/library/SavedSnapshotsPanel";
 import { formatRelative } from "@/lib/format";
 
 const PAGE_SIZE = 24;
@@ -34,12 +35,16 @@ const KIND_HINTS: Record<LibraryKind, string> = {
   system: "Complete deployments: a datalogger plus its sensors.",
 };
 
-type Scope = "mine" | "public";
+type Scope = "mine" | "public" | "official";
 
 const SCOPE_LABELS: Record<Scope, string> = {
   mine: "My configs",
   public: "Published",
+  official: "Official RRIV",
 };
+
+/** The library kinds, plus your saved snapshots. */
+type View = LibraryKind | "saved";
 
 type SortKey = "createdAt:desc" | "createdAt:asc" | "name:asc" | "name:desc";
 
@@ -55,7 +60,8 @@ function isUnauthorized(error: unknown): boolean {
 }
 
 export function LibraryPage() {
-  const [kind, setKind] = useState<LibraryKind>("sensor");
+  const [view, setView] = useState<View>("sensor");
+  const kind: LibraryKind = view === "saved" ? "system" : view;
   const [scope, setScope] = useState<Scope>("public");
   const [sort, setSort] = useState<SortKey>("createdAt:desc");
   const [offset, setOffset] = useState(0);
@@ -72,7 +78,8 @@ export function LibraryPage() {
     ];
     return {
       search: search || undefined,
-      isPublic: scope === "public" ? true : undefined,
+      isPublic: scope === "mine" ? undefined : true,
+      isOfficial: scope === "official" ? true : undefined,
       // Author filtering only applies to published (someone else's) configs.
       author: scope === "public" ? author || undefined : undefined,
       orderBy,
@@ -82,7 +89,7 @@ export function LibraryPage() {
     };
   }, [sort, scope, search, author, offset]);
 
-  const query = useLibraryConfigs(kind, filters);
+  const query = useLibraryConfigs(kind, filters, view !== "saved");
   const entries = query.data ?? [];
   const unauthorized = isUnauthorized(query.error);
 
@@ -90,8 +97,8 @@ export function LibraryPage() {
     setOffset(next.offset ?? 0);
   }
 
-  function changeKind(next: LibraryKind) {
-    setKind(next);
+  function changeView(next: View) {
+    setView(next);
     resetTo();
   }
 
@@ -129,27 +136,37 @@ export function LibraryPage() {
             creators and payloads.
           </p>
         </div>
-        <Badge tone="brand">{KIND_LABELS[kind]}</Badge>
+        <div className="flex items-center gap-2">
+          <Badge tone="brand">{view === "saved" ? "Saved" : KIND_LABELS[kind]}</Badge>
+          <Link to={`/library/new?kind=${kind}`} className="btn btn-primary">
+            New config
+          </Link>
+        </div>
       </header>
 
       {/* ------------------------------------------------------------ Tabs */}
       <div className="flex flex-wrap gap-1.5">
-        {LIBRARY_KINDS.map((option) => (
+        {[...LIBRARY_KINDS, "saved" as const].map((option) => (
           <button
             key={option}
             type="button"
-            onClick={() => changeKind(option)}
+            onClick={() => changeView(option)}
             className={[
               "rounded-lg px-3 py-1.5 text-sm transition",
-              option === kind
+              option === view
                 ? "bg-surface-2 text-fg"
                 : "text-fg-muted hover:text-fg",
             ].join(" ")}
           >
-            {KIND_LABELS[option]}
+            {option === "saved" ? "My saved configs" : KIND_LABELS[option]}
           </button>
         ))}
       </div>
+
+      {view === "saved" ? (
+        <SavedSnapshotsPanel />
+      ) : (
+      <>
 
       {/* --------------------------------------------------------- Controls */}
       <SectionCard
@@ -226,7 +243,9 @@ export function LibraryPage() {
         <p className="mt-3 text-xs text-fg-subtle">
           {scope === "mine"
             ? "Showing configurations created by your account."
-            : "Showing configurations published to the shared library. Optionally filter by an author's name."}
+            : scope === "official"
+              ? "Showing official RRIV configurations."
+              : "Showing configurations published to the shared library. Optionally filter by an author's name."}
         </p>
       </SectionCard>
 
@@ -274,6 +293,8 @@ export function LibraryPage() {
           noun="config"
         />
       ) : null}
+      </>
+      )}
     </div>
   );
 }
@@ -292,9 +313,12 @@ function LibraryEntryCard({
     >
       <div className="flex items-start justify-between gap-3">
         <p className="truncate text-sm font-medium text-fg">{entry.name}</p>
-        <Badge tone={entry.isPublic ? "brand" : "neutral"}>
-          {entry.isPublic ? "Public" : "Private"}
-        </Badge>
+        <div className="flex shrink-0 gap-1">
+          {entry.isOfficial ? <Badge tone="brand">Official</Badge> : null}
+          <Badge tone={entry.isPublic ? "brand" : "neutral"}>
+            {entry.isPublic ? "Public" : "Private"}
+          </Badge>
+        </div>
       </div>
 
       {entry.description ? (

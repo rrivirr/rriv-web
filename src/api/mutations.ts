@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { savedSnapshotKeys } from "./savedSnapshots";
 import { useApiClient } from "./client";
 import type { AccountRef, Context, Device, DeviceContext } from "./types";
 
@@ -194,11 +195,13 @@ export function useSendCommand() {
 
 export function useSaveSnapshot() {
   const api = useApiClient();
+  const client = useQueryClient();
   return useMutation({
     mutationFn: (body: {
       name: string;
       deviceId: string;
       contextId: string;
-    }) => api.post<void>("/configSnapshot/save", body),
+    }) => api.post<{ id: string; name: string }>("/configSnapshot/save", body),
+    onSuccess: () => client.invalidateQueries({ queryKey: savedSnapshotKeys.list }),
   });
 }

@@ -64,6 +64,24 @@ describe("ContextsPage", () => {
     await waitFor(() => expect(posted).toEqual({ name: "spring-2026" }));
   });
 
+  it("allows context names up to 30 characters", async () => {
+    const user = userEvent.setup();
+    server.use(http.get(contextsUrl, () => HttpResponse.json([])));
+    renderWithProviders(<ContextsPage />, { auth });
+    await screen.findByText("No contexts found");
+
+    await user.click(screen.getByRole("button", { name: "New context" }));
+    const field = screen.getByLabelText(/Context name/);
+    expect(field).toHaveAttribute("maxLength", "30");
+    const create = screen.getByRole("button", { name: "Create" });
+
+    await user.type(field, "ab");
+    expect(create).toBeDisabled();
+    await user.type(field, "c".repeat(28));
+    expect(field).toHaveValue("ab" + "c".repeat(28));
+    expect(create).toBeEnabled();
+  });
+
   it("paginates contexts", async () => {
     const user = userEvent.setup();
     const offsets: string[] = [];

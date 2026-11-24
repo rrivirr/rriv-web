@@ -30,6 +30,10 @@ describe("LibraryPage", () => {
       "href",
       "/library/sensor/l1",
     );
+    expect(screen.getByRole("link", { name: "New config" })).toHaveAttribute(
+      "href",
+      "/library/new?kind=sensor",
+    );
   });
 
   it("shows an empty state", async () => {
@@ -83,5 +87,37 @@ describe("LibraryPage", () => {
     await waitFor(() =>
       expect(paths).toContain("/datalogger/libraryConfig"),
     );
+  });
+
+  it("lists official configs, badged", async () => {
+    const user = userEvent.setup();
+    const queries: (string | null)[][] = [];
+    server.use(
+      http.get(sensorUrl, ({ request }) => {
+        const params = new URL(request.url).searchParams;
+        queries.push([params.get("isPublic"), params.get("isOfficial")]);
+        return HttpResponse.json([{ ...entry, isOfficial: params.get("isOfficial") === "true" }]);
+      }),
+    );
+    renderWithProviders(<LibraryPage />);
+    await screen.findByText("ph-standard");
+    await user.selectOptions(screen.getByLabelText("Scope"), "official");
+    expect(await screen.findByText("Official")).toBeInTheDocument();
+    expect(queries).toContainEqual(["true", "true"]);
+  });
+
+  it("shows your saved configs", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(sensorUrl, () => HttpResponse.json([entry])),
+      http.get("http://api.test/configSnapshot", () =>
+        HttpResponse.json([
+          { id: "snap1", name: "before-trip", DataloggerConfig: [], SensorConfig: [] },
+        ]),
+      ),
+    );
+    renderWithProviders(<LibraryPage />);
+    await user.click(screen.getByRole("button", { name: "My saved configs" }));
+    expect(await screen.findByText("before-trip")).toBeInTheDocument();
   });
 });

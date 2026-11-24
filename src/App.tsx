@@ -14,6 +14,7 @@ import { DevicesPage } from "@/pages/DevicesPage";
 import { LandingPage } from "@/pages/LandingPage";
 import { LibraryConfigPage } from "@/pages/LibraryConfigPage";
 import { LibraryPage } from "@/pages/LibraryPage";
+import { LibraryNewPage } from "@/pages/LibraryNewPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { MonitoringPage } from "@/pages/MonitoringPage";
 import { NotificationsPage } from "@/pages/NotificationsPage";
@@ -50,6 +51,7 @@ export function App() {
             <Route path="/devices/:deviceId" element={<DeviceDetailPage />} />
             <Route path="/connect" element={<DeviceConnectionPage />} />
             <Route path="/library" element={<LibraryPage />} />
+            <Route path="/library/new" element={<LibraryNewPage />} />
             <Route path="/library/:kind/:id" element={<LibraryConfigPage />} />
             <Route path="/admin" element={<AdminPage />} />
             <Route path="/notifications" element={<NotificationsPage />} />

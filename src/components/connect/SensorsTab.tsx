@@ -19,7 +19,7 @@ import {
 } from "@/serial";
 import { ConfigForm, parseJsonObject } from "./ConfigForm";
 import { reportApply, syncFeedback } from "./syncFeedback";
-import type { BoardLink } from "./useBoardLink";
+import type { BoardLink, SyncOutcome } from "./useBoardLink";
 import { ConfirmButton, type Feedback, FeedbackCallout, button, input, label, primary, useTask } from "./ui";
 
 /** Properties the board fixes once a sensor exists. */
@@ -113,7 +113,13 @@ export function SensorsTab({
                     const removed = await removeAllSensors(client);
                     setSensors([]);
                     setSelected(null);
-                    return { tone: "success", message: `Removed ${removed.length} sensor(s).` };
+                    const retry = () => syncRemovals(link, removed);
+                    return syncFeedback(
+                      `Removal of ${removed.length} sensor(s)`,
+                      await retry(),
+                      retry,
+                      list.setFeedback,
+                    );
                   })
                 }
               >
@@ -146,9 +152,15 @@ export function SensorsTab({
           id={selected}
           locked={locked}
           notice={notice}
-          onRemoved={() => {
+          onRemoved={(sensorId, outcome, retry) => {
             setSelected(null);
-            void refresh();
+            // The sensor's panel is gone, so the list reports the cloud sync
+            // (after the refresh, which clears the list's feedback).
+            void refresh().then(() =>
+              list.setFeedback(
+                syncFeedback(`Removal of sensor ${sensorId}`, outcome, retry, list.setFeedback),
+              ),
+            );
           }}
         />
       ) : (
@@ -174,7 +186,7 @@ function SensorDetail({
   id: string;
   locked: boolean;
   notice: Feedback | null;
-  onRemoved: () => void;
+  onRemoved: (id: string, outcome: SyncOutcome, retry: () => Promise<SyncOutcome>) => void;
 }) {
   const task = useTask();
   const [config, setConfig] = useState<SerialRecord | null>(null);
@@ -217,7 +229,8 @@ function SensorDetail({
             onConfirm={() =>
               void task.run("remove", async () => {
                 await removeSensor(client, id);
-                onRemoved();
+                const retry = () => link.syncSensorRemoval(id);
+                onRemoved(id, await retry(), retry);
               })
             }
           >
@@ -415,5 +428,15 @@ function Calibration({ client, id, locked }: { client: SerialClient; id: string;
         <FeedbackCallout feedback={task.feedback} />
       </div>
     </SectionCard>
+  );
+}
+
+/** End the cloud config of each removed sensor; the first failure wins. */
+async function syncRemovals(link: BoardLink, ids: string[]): Promise<SyncOutcome> {
+  const outcomes: SyncOutcome[] = [];
+  for (const id of ids) outcomes.push(await link.syncSensorRemoval(id));
+  return (
+    outcomes.find((outcome) => outcome.kind === "failed") ??
+    outcomes.find((outcome) => outcome.kind === "skipped") ?? { kind: "synced" }
   );
 }

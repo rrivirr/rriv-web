@@ -53,6 +53,17 @@ export interface RegisterEuiBody {
   application?: string;
 }
 
+/**
+ * The library version a config came from (`kind` is the library's kind:
+ * a whole-board apply uses `system` for the datalogger and each sensor).
+ * Left out for hand edits; rriv-api then keeps the previous row's source.
+ * `null` clears it (e.g. a saved snapshot was applied).
+ */
+export interface ConfigSource {
+  kind: "sensor" | "datalogger" | "system";
+  versionId: string;
+}
+
 export interface SensorConfigBody {
   name: string;
   sensorDriverId: string;
@@ -61,6 +72,7 @@ export interface SensorConfigBody {
   singlePropertyChange: boolean;
   createdAt: string;
   config: Record<string, unknown>;
+  source?: ConfigSource | null;
 }
 
 export interface DataloggerConfigBody {
@@ -71,6 +83,7 @@ export interface DataloggerConfigBody {
   singlePropertyChange: boolean;
   createdAt: string;
   config: Record<string, unknown>;
+  source?: ConfigSource | null;
 }
 
 export const driverKeys = {
@@ -131,6 +144,21 @@ export function useCreateSensorConfig() {
   return useMutation({
     mutationFn: (body: SensorConfigBody) =>
       api.post<void>("/sensor/config", body),
+  });
+}
+
+/**
+ * A sensor was removed from the board: end its cloud config
+ * (`POST /sensor/config/deactivate`). It stays in the history.
+ */
+export function useDeactivateSensorConfig() {
+  const api = useApiClient();
+  return useMutation({
+    mutationFn: (body: { name: string; deviceId: string; contextId: string }) =>
+      api.post<void>("/sensor/config/deactivate", {
+        ...body,
+        deactivatedAt: new Date().toISOString(),
+      }),
   });
 }
 

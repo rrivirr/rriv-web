@@ -1,4 +1,5 @@
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { Route, Routes } from "react-router";
 import { describe, expect, it } from "vitest";
@@ -54,6 +55,20 @@ describe("LibraryConfigPage", () => {
     ).toBeInTheDocument();
   });
 
+  it("links each version to the connect page, ready to apply", async () => {
+    server.use(
+      http.get(`${api}/sensor/libraryConfig/l1`, () => HttpResponse.json(detail)),
+    );
+    renderWithProviders(page, { route: "/library/sensor/l1" });
+    expect(
+      await screen.findByRole("link", { name: "Apply v1 to a device" }),
+    ).toHaveAttribute("href", "/connect?apply=sensor%3Al1%3A1");
+    expect(screen.getByRole("link", { name: "Copy v1 to a new config" })).toHaveAttribute(
+      "href",
+      "/library/new?copy=sensor:l1:1",
+    );
+  });
+
   it("renders the detail with its versions", async () => {
     server.use(
       http.get(`${api}/sensor/libraryConfig/l1`, () => HttpResponse.json(detail)),
@@ -80,5 +95,61 @@ describe("LibraryConfigPage", () => {
     expect(
       await screen.findByText("Could not load this configuration: boom"),
     ).toBeInTheDocument();
+  });
+
+  it("gives the owner edit, visibility and archive controls", async () => {
+    const user = userEvent.setup();
+    const patches: unknown[] = [];
+    let archived = false;
+    server.use(
+      http.get(`${api}/sensor/libraryConfig/l1`, () =>
+        HttpResponse.json({ ...detail, description: "field kit", isMine: true, isPublic: false }),
+      ),
+      http.patch(`${api}/sensor/libraryConfig/l1`, async ({ request }) => {
+        patches.push(await request.json());
+        return HttpResponse.json({ id: "l1" });
+      }),
+      http.delete(`${api}/sensor/libraryConfig/l1`, () => {
+        archived = true;
+        return new HttpResponse(null, { status: 204 });
+      }),
+      http.get(`${api}/sensor/libraryConfig`, () => HttpResponse.json([])),
+    );
+    renderWithProviders(page, { route: "/library/sensor/l1" });
+
+    await user.click(await screen.findByRole("button", { name: "Make public" }));
+    await waitFor(() => expect(patches).toContainEqual({ isPublic: true }));
+
+    await user.click(screen.getByRole("button", { name: "Edit name and description" }));
+    const name = screen.getByLabelText("Name");
+    await user.clear(name);
+    await user.type(name, "ph-field");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(patches).toContainEqual({ name: "ph-field", description: "field kit" }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Archive" }));
+    await user.click(screen.getByRole("button", { name: "Archive it" }));
+    await waitFor(() => expect(archived).toBe(true));
+  });
+
+  it("keeps an official config public and hides controls from others", async () => {
+    server.use(
+      http.get(`${api}/sensor/libraryConfig/l1`, () =>
+        HttpResponse.json({ ...detail, isMine: true, isOfficial: true }),
+      ),
+    );
+    const view = renderWithProviders(page, { route: "/library/sensor/l1" });
+    expect(await screen.findByText("Official RRIV")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Make private" })).toBeDisabled();
+    view.unmount();
+
+    server.use(
+      http.get(`${api}/sensor/libraryConfig/l1`, () => HttpResponse.json({ ...detail, isMine: false })),
+    );
+    renderWithProviders(page, { route: "/library/sensor/l1" });
+    await screen.findByText("ph-standard");
+    expect(screen.queryByRole("button", { name: /Make (public|private)/ })).not.toBeInTheDocument();
   });
 });

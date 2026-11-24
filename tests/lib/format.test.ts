@@ -1,18 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  formatCount,
   formatDate,
   formatRelative,
   initials,
 } from "@/lib/format";
-
-describe("formatCount", () => {
-  it("groups digits and falls back to an em dash", () => {
-    expect(formatCount(1234)).toBe("1,234");
-    expect(formatCount(0)).toBe("0");
-    expect(formatCount(undefined)).toBe("—");
-  });
-});
 
 describe("formatDate", () => {
   it("formats a date and guards empties/invalids", () => {

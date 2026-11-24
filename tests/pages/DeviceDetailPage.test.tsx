@@ -2,7 +2,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { Route, Routes } from "react-router";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { DeviceDetailPage } from "@/pages/DeviceDetailPage";
 import type { Device } from "@/api/types";
 import { renderWithProviders } from "../helpers/render";
@@ -89,7 +89,8 @@ describe("DeviceDetailPage", () => {
     expect(screen.getByText("upstream", { exact: false })).toBeInTheDocument();
     expect(await screen.findByText("v1.2.3")).toBeInTheDocument();
     expect(await screen.findByText("checked battery")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save snapshot" })).toBeInTheDocument();
+    // Saving a snapshot lives with the current config, not in its own block.
+    expect(screen.queryByText("Snapshots")).not.toBeInTheDocument();
     expect(
       await screen.findByText("No readings in this window"),
     ).toBeInTheDocument();
@@ -198,5 +199,64 @@ describe("DeviceDetailPage", () => {
       expect(offsets.history.filter((value) => value === "0").length)
         .toBeGreaterThan(1),
     );
+  });
+
+  it("shows where each config came from, and publishes it to the library", async () => {
+    const user = userEvent.setup();
+    useDetailHandlers();
+    const created = vi.fn();
+    server.use(
+      http.get(`${api}/configSnapshot/active`, () =>
+        HttpResponse.json({
+          dataloggerConfig: { config: { site_name: "SITE-A" }, source: null },
+          sensorConfig: [
+            {
+              id: "s1",
+              name: "ph01",
+              config: { type: "ph", wait_time: 3 },
+              source: {
+                kind: "sensor",
+                versionId: "v3id",
+                version: 3,
+                libraryConfigId: "lib1",
+                name: "ph-probe",
+                latestVersion: 4,
+                updateAvailable: true,
+                changedSettings: 2,
+              },
+            },
+          ],
+        }),
+      ),
+      http.post(`${api}/datalogger/libraryConfig`, async ({ request }) => {
+        created(await request.json());
+        return HttpResponse.json({ id: "dl1", name: "site-a" }, { status: 201 });
+      }),
+    );
+
+    renderWithProviders(page, { route: "/devices/d1" });
+    await user.click(await screen.findByRole("button", { name: "View config" }));
+
+    expect(await screen.findByText("Not from the library")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "ph-probe v3" })).toHaveAttribute("href", "/library/sensor/lib1");
+    expect(screen.getByText(/2 settings changed/)).toBeInTheDocument();
+    expect(screen.getByText("v4 available")).toBeInTheDocument();
+
+    // Save and publish sit side by side under the current config.
+    await user.click(screen.getByRole("button", { name: "Save as snapshot" }));
+    expect(screen.getByLabelText("Snapshot name")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Publish to library" }));
+    expect(screen.queryByLabelText("Snapshot name")).not.toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("What to publish"), "datalogger");
+    await user.type(screen.getByLabelText(/^Name/), "site-a");
+    // The firmware the board runs now (latest install).
+    await waitFor(() => expect(screen.getByText(/made with firmware 1\.2\.3/)).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Publish" }));
+    expect(await screen.findByText("Published site-a to the library.")).toBeInTheDocument();
+    expect(created).toHaveBeenCalledWith({
+      name: "site-a",
+      firmwareVersion: "1.2.3",
+      config: { site_name: "SITE-A" },
+    });
   });
 });
