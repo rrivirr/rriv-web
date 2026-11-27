@@ -275,11 +275,13 @@ export function useBoardLink(serial: SerialConnection) {
     applied: SerialRecord,
     to: Placement | null = target,
     source?: ConfigSource | null,
+    /** The driver to record it with (a library version's); defaults to the first. */
+    driverId?: string,
   ): Promise<SyncOutcome> => {
       if (!to) return notLinked;
       try {
         const drivers = sensorDrivers.data ?? (await sensorDrivers.refetch()).data;
-        const driver = pickDriver(drivers);
+        const driver = driverId ? { id: driverId } : pickDriver(drivers);
         if (!driver) return { kind: "failed", error: "No sensor drivers found; contact an admin." };
         await createSensorConfig.mutateAsync({
           ...sensorConfigUpload(applied, { ...to, driverId: driver.id }),
@@ -309,11 +311,13 @@ export function useBoardLink(serial: SerialConnection) {
     applied: SerialRecord,
     to: Placement | null = target,
     source?: ConfigSource | null,
+    /** The driver to record it with (a library version's); defaults to the first. */
+    driverId?: string,
   ): Promise<SyncOutcome> => {
       if (!to) return notLinked;
       try {
         const drivers = dataloggerDrivers.data ?? (await dataloggerDrivers.refetch()).data;
-        const driver = pickDriver(drivers);
+        const driver = driverId ? { id: driverId } : pickDriver(drivers);
         if (!driver) {
           return { kind: "failed", error: "No datalogger drivers found; contact an admin." };
         }

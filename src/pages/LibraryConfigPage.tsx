@@ -133,6 +133,7 @@ export function LibraryConfigPage() {
                     version={version}
                     kind={kind}
                     configId={detail.id}
+                    isMine={Boolean(detail.isMine)}
                     defaultOpen={index === 0}
                   />
                 ))}
@@ -160,11 +161,13 @@ function VersionItem({
   version,
   kind,
   configId,
+  isMine,
   defaultOpen,
 }: {
   version: LibraryConfigVersion;
   kind: LibraryKind;
   configId: string;
+  isMine: boolean;
   defaultOpen: boolean;
 }) {
   return (
@@ -204,9 +207,15 @@ function VersionItem({
           >
             Copy to a new config
           </Link>
-          <span className="text-xs text-fg-subtle">
-            Connect a board over USB, then review the changes before they're sent.
-          </span>
+          {isMine ? (
+            <Link
+              to={`/library/new?edit=${kind}:${configId}:${version.version}`}
+              className="btn btn-ghost px-3 py-1.5"
+              aria-label={`Edit v${version.version} as a new version`}
+            >
+              Edit as new version
+            </Link>
+          ) : null}
         </div>
       </div>
     </details>
@@ -313,7 +322,7 @@ function OwnerControls({ kind, detail }: { kind: LibraryKind; detail: LibraryCon
   return (
     <SectionCard
       title="Manage"
-      subtitle="Only you can change this config. Publish new versions from a device's page or a saved config."
+      subtitle="Only you can change this config. Add versions with “Edit as new version”, or publish from a device's page or a saved config."
     >
       <div className="space-y-3">
         {editing ? (

@@ -12,7 +12,8 @@ const api = "http://api.test";
 
 const content = {
   datalogger: { site_name: "SITE-A" },
-  sensors: [{ name: "ph01", config: { type: "ph" } }],
+  dataloggerDriverId: "dd",
+  sensors: [{ name: "ph01", config: { type: "ph" }, driverId: "sd" }],
 };
 
 describe("PublishPanel", () => {
@@ -41,8 +42,9 @@ describe("PublishPanel", () => {
     expect(created).toHaveBeenCalledWith({
       name: "station",
       firmwareVersion: "1.4.0",
+      dataloggerDriverId: "dd",
       datalogger: { site_name: "SITE-A" },
-      sensors: [{ type: "ph", name: "ph01" }],
+      sensors: [{ type: "ph", name: "ph01", sensorDriverId: "sd" }],
     });
     expect(patched).toHaveBeenCalledWith({ isPublic: true });
     expect(screen.getByRole("link", { name: "View in library" })).toHaveAttribute(
@@ -73,7 +75,7 @@ describe("PublishPanel", () => {
     await user.click(screen.getByRole("button", { name: "Publish" }));
 
     expect(await screen.findByText("Published a new version of ph-probe.")).toBeInTheDocument();
-    expect(published).toHaveBeenCalledWith({ sensorName: "ph01", config: { type: "ph" } });
+    expect(published).toHaveBeenCalledWith({ sensorName: "ph01", sensorDriverId: "sd", config: { type: "ph" } });
   });
 
   it("holds back a description the API would refuse", async () => {

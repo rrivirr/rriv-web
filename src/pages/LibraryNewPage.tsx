@@ -2,14 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { IconArrowLeft } from "@/assets/Icons";
-import { pickDriver, useDataloggerDrivers, useSensorDrivers } from "@/api/deviceLink";
+import { type Driver, useDataloggerDrivers, useSensorDrivers } from "@/api/deviceLink";
 import {
   LIBRARY_KINDS,
   type LibraryKind,
   libraryVersions,
   useLibraryConfig,
 } from "@/api/library";
-import { useCreateLibraryConfig, useUpdateLibraryConfig } from "@/api/libraryManage";
+import { useCreateLibraryConfig, usePublishLibraryVersion, useUpdateLibraryConfig } from "@/api/libraryManage";
 import type { LibraryConfigVersion } from "@/api/types";
 import { SectionCard } from "@/components/SectionCard";
 import { type Settings, SettingsEditor } from "@/components/library/SettingsEditor";
@@ -27,22 +27,31 @@ const SENSOR_NAME_MAX = 12;
 /** rriv-api's firmware version pattern: 1–32 printable characters. */
 const FIRMWARE_PATTERN = /^[\x21-\x7e]{1,32}$/;
 
+/** Each object carries the driver it's for (chosen by the user); "" = not chosen. */
 interface Draft {
   datalogger: Settings;
+  dataloggerDriverId: string;
   sensorName: string;
   sensor: Settings;
-  sensors: { name: string; config: Settings }[];
+  sensorDriverId: string;
+  sensors: { name: string; config: Settings; driverId: string }[];
 }
 
 const BLANK: Draft = {
   datalogger: {},
+  dataloggerDriverId: "",
   sensorName: "",
   sensor: { type: "" },
+  sensorDriverId: "",
   sensors: [],
 };
 
-/** `?copy=<kind>:<id>:<version>`: start from a copy of that version. */
-function parseCopy(value: string | null) {
+/**
+ * `?copy=<kind>:<id>:<version>` starts a new config from a copy of that
+ * version; `?edit=<kind>:<id>:<version>` (owner only) starts the next version
+ * of the same config from it.
+ */
+function parseVersionRef(value: string | null) {
   const [kind, id, version] = value?.split(":") ?? [];
   const number = Number(version);
   if (!kind || !id || !Number.isInteger(number) || number < 1) return null;
@@ -58,24 +67,37 @@ function draftFrom(kind: LibraryKind, version: LibraryConfigVersion): Draft {
     return {
       ...BLANK,
       datalogger: clone(snapshot?.DataloggerConfig?.[0]?.config ?? {}),
+      dataloggerDriverId: snapshot?.DataloggerConfig?.[0]?.dataloggerDriverId ?? "",
       sensors: (snapshot?.SensorConfig ?? []).map((sensor) => ({
         name: sensor.name,
         config: clone(sensor.config),
+        driverId: sensor.sensorDriverId ?? "",
       })),
     };
   }
   if (kind === "datalogger") {
-    return { ...BLANK, datalogger: clone(version.DataloggerConfig?.config ?? {}) };
+    return {
+      ...BLANK,
+      datalogger: clone(version.DataloggerConfig?.config ?? {}),
+      dataloggerDriverId: version.DataloggerConfig?.dataloggerDriverId ?? "",
+    };
   }
   return {
     ...BLANK,
     sensorName: version.SensorConfig?.name ?? "",
     sensor: clone(version.SensorConfig?.config ?? { type: "" }),
+    sensorDriverId: version.SensorConfig?.sensorDriverId ?? "",
   };
 }
 
-const sensorProblems = (name: string, config: Settings, label: string): string[] => {
+const sensorProblems = (
+  name: string,
+  config: Settings,
+  driverId: string,
+  label: string,
+): string[] => {
   const problems: string[] = [];
+  if (!driverId) problems.push(`${label}: choose a driver.`);
   const trimmed = name.trim();
   if (!trimmed) problems.push(`${label}: a sensor name is required.`);
   else if (trimmed.length > SENSOR_NAME_MAX) {
@@ -88,17 +110,20 @@ const sensorProblems = (name: string, config: Settings, label: string): string[]
 };
 
 /**
- * Create a library config from scratch, or from a copy of any version you
- * can see (a plain, independent copy). The API checks the settings against
- * the driver's schema.
+ * Create a library config from scratch or from a copy of any version you can
+ * see (a plain, independent copy), or edit one of your versions into the next
+ * version of the same config. The API checks the settings against the
+ * driver's schema and numbers versions itself.
  */
 export function LibraryNewPage() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
-  const copy = useMemo(() => parseCopy(params.get("copy")), [params]);
+  const edit = useMemo(() => parseVersionRef(params.get("edit")), [params]);
+  const copy = useMemo(() => (edit ? null : parseVersionRef(params.get("copy"))), [edit, params]);
+  const from = edit ?? copy;
   const kindParam = params.get("kind") ?? "";
   const initialKind: LibraryKind =
-    copy?.kind ??
+    from?.kind ??
     ((LIBRARY_KINDS as readonly string[]).includes(kindParam) ? (kindParam as LibraryKind) : "system");
 
   const [kind, setKind] = useState<LibraryKind>(initialKind);
@@ -108,35 +133,45 @@ export function LibraryNewPage() {
   const [firmwareVersion, setFirmwareVersion] = useState("");
   const [makePublic, setMakePublic] = useState(false);
 
-  const source = useLibraryConfig(copy?.kind ?? "system", copy?.id);
-  const sourceVersion = source.data
-    ? libraryVersions(source.data).find((entry) => entry.version === copy?.version)
-    : undefined;
+  const source = useLibraryConfig(from?.kind ?? "system", from?.id);
+  const sourceVersions = source.data ? libraryVersions(source.data) : [];
+  const sourceVersion = sourceVersions.find((entry) => entry.version === from?.version);
+  const nextVersion = Math.max(0, ...sourceVersions.map((entry) => entry.version)) + 1;
+  /** Only the owner can add versions; the API refuses anyone else too. */
+  const notOwner = Boolean(edit && source.data && !source.data.isMine);
 
-  // Start from the copied version once it loads.
+  // Start from the chosen version once it loads.
   useEffect(() => {
-    if (!copy || !sourceVersion) return;
-    setKind(copy.kind);
-    setDraft(draftFrom(copy.kind, sourceVersion));
+    if (!from || !sourceVersion) return;
+    setKind(from.kind);
+    setDraft(draftFrom(from.kind, sourceVersion));
     setFirmwareVersion(sourceVersion.firmwareVersion ?? "");
-  }, [copy, sourceVersion]);
+  }, [from, sourceVersion]);
 
-  const sensorDriver = pickDriver(useSensorDrivers().data);
-  const dataloggerDriver = pickDriver(useDataloggerDrivers().data);
+  const sensorDrivers = useSensorDrivers().data ?? [];
+  const dataloggerDrivers = useDataloggerDrivers().data ?? [];
+  const schemaOf = (drivers: Driver[], id: string) =>
+    drivers.find((driver) => driver.id === id)?.validation ?? null;
   const create = useCreateLibraryConfig();
   const update = useUpdateLibraryConfig();
-  const busy = create.isPending || update.isPending;
+  const publish = usePublishLibraryVersion();
+  const busy = create.isPending || update.isPending || publish.isPending;
+  const descriptionLabel = edit ? "Version note" : "Description";
 
   const problems = [
-    nameProblem(name, "Name"),
-    nameProblem(description, "Description", true),
+    edit ? null : nameProblem(name, "Name"),
+    nameProblem(description, descriptionLabel, true),
+    edit && !sourceVersion ? "The version to edit hasn't loaded." : null,
     firmwareVersion.trim() && !FIRMWARE_PATTERN.test(firmwareVersion.trim())
       ? "Firmware version must be 1–32 characters with no spaces."
       : null,
-    ...(kind === "sensor" ? sensorProblems(draft.sensorName, draft.sensor, "Sensor") : []),
+    ...(kind === "sensor"
+      ? sensorProblems(draft.sensorName, draft.sensor, draft.sensorDriverId, "Sensor")
+      : []),
+    kind !== "sensor" && !draft.dataloggerDriverId ? "Datalogger: choose a driver." : null,
     ...(kind === "system"
       ? draft.sensors.flatMap((sensor, index) =>
-          sensorProblems(sensor.name, sensor.config, `Sensor ${index + 1}`),
+          sensorProblems(sensor.name, sensor.config, sensor.driverId, `Sensor ${index + 1}`),
         )
       : []),
     kind === "system" && new Set(draft.sensors.map((s) => s.name.trim().toLowerCase())).size !== draft.sensors.length
@@ -146,24 +181,42 @@ export function LibraryNewPage() {
 
   const body = () => {
     const common = {
-      name: name.trim(),
+      // A new version keeps its config's name.
+      ...(edit ? {} : { name: name.trim() }),
       ...(description.trim() ? { description: description.trim() } : {}),
       ...(firmwareVersion.trim() ? { firmwareVersion: firmwareVersion.trim() } : {}),
     };
     if (kind === "sensor") {
-      return { ...common, sensorName: draft.sensorName.trim(), config: draft.sensor };
+      return {
+        ...common,
+        sensorName: draft.sensorName.trim(),
+        sensorDriverId: draft.sensorDriverId,
+        config: draft.sensor,
+      };
     }
-    if (kind === "datalogger") return { ...common, config: draft.datalogger };
+    if (kind === "datalogger") {
+      return { ...common, dataloggerDriverId: draft.dataloggerDriverId, config: draft.datalogger };
+    }
     return {
       ...common,
+      dataloggerDriverId: draft.dataloggerDriverId,
       datalogger: draft.datalogger,
-      sensors: draft.sensors.map((sensor) => ({ ...sensor.config, name: sensor.name.trim() })),
+      sensors: draft.sensors.map((sensor) => ({
+        ...sensor.config,
+        name: sensor.name.trim(),
+        sensorDriverId: sensor.driverId,
+      })),
     };
   };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (problems.length) return;
+    if (problems.length || notOwner) return;
+    if (edit) {
+      await publish.mutateAsync({ kind, id: edit.id, body: body() });
+      navigate(`/library/${kind}/${edit.id}`);
+      return;
+    }
     const created = await create.mutateAsync({ kind, body: body() });
     if (makePublic) {
       await update.mutateAsync({ kind, id: created.id, changes: { isPublic: true } });
@@ -171,7 +224,8 @@ export function LibraryNewPage() {
     navigate(`/library/${kind}/${created.id}`);
   };
 
-  const error = create.error ?? update.error;
+  const error = create.error ?? update.error ?? publish.error;
+  const backTo = edit ? `/library/${edit.kind}/${edit.id}` : "/library";
   const setSensor = (index: number, next: Partial<Draft["sensors"][number]>) =>
     setDraft((current) => ({
       ...current,
@@ -181,16 +235,26 @@ export function LibraryNewPage() {
   return (
     <div className="space-y-6">
       <Link
-        to="/library"
+        to={backTo}
         className="inline-flex items-center gap-1.5 text-sm text-fg-muted transition hover:text-fg"
       >
         <IconArrowLeft className="h-4 w-4" />
-        Back to library
+        {edit ? "Back to config" : "Back to library"}
       </Link>
       <header>
-        <h1 className="text-2xl font-semibold tracking-tight text-fg">New library config</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-fg">
+          {edit ? (source.data ? `New version of ${source.data.name}` : "New version") : "New library config"}
+        </h1>
         <p className="mt-1 text-sm text-fg-muted">
-          {copy
+          {edit
+            ? notOwner
+              ? "Only the config's owner can add versions. Copy it to a new config instead."
+              : sourceVersion
+                ? `Starting from v${edit.version}. Publishing adds v${nextVersion}; earlier versions stay as they are.`
+                : source.isError
+                  ? "The version to edit isn't available."
+                  : "Loading the version to edit…"
+            : copy
             ? sourceVersion
               ? `Starting from a copy of ${source.data?.name} v${copy.version}. Your config is independent of it.`
               : source.isError
@@ -201,14 +265,17 @@ export function LibraryNewPage() {
       </header>
 
       <form className="space-y-6" onSubmit={(event) => void submit(event).catch(() => undefined)}>
-        <SectionCard title="About" subtitle="How it appears in the library">
+        <SectionCard
+          title="About"
+          subtitle={edit ? "Shown with this version in the library" : "How it appears in the library"}
+        >
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block text-xs text-fg-muted">
               What it configures
               <select
                 className="field mt-1"
                 value={kind}
-                disabled={Boolean(copy)}
+                disabled={Boolean(from)}
                 onChange={(event) => {
                   setKind(event.target.value as LibraryKind);
                   setDraft(BLANK);
@@ -221,12 +288,14 @@ export function LibraryNewPage() {
                 ))}
               </select>
             </label>
+            {edit ? null : (
+              <label className="block text-xs text-fg-muted">
+                Name
+                <input className="field mt-1" value={name} maxLength={20} onChange={(event) => setName(event.target.value)} />
+              </label>
+            )}
             <label className="block text-xs text-fg-muted">
-              Name
-              <input className="field mt-1" value={name} maxLength={20} onChange={(event) => setName(event.target.value)} />
-            </label>
-            <label className="block text-xs text-fg-muted">
-              Description (optional)
+              {descriptionLabel} (optional)
               <input
                 className="field mt-1"
                 value={description}
@@ -245,18 +314,26 @@ export function LibraryNewPage() {
               />
             </label>
           </div>
-          <label className="mt-3 flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={makePublic} onChange={(event) => setMakePublic(event.target.checked)} />
-            Make it public
-          </label>
+          {edit ? null : (
+            <label className="mt-3 flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={makePublic} onChange={(event) => setMakePublic(event.target.checked)} />
+              Make it public
+            </label>
+          )}
         </SectionCard>
 
         {kind !== "sensor" ? (
           <SectionCard title="Datalogger" subtitle="Settings applied to the datalogger">
+            <DriverPicker
+              label="Datalogger driver"
+              drivers={dataloggerDrivers}
+              value={draft.dataloggerDriverId}
+              onChange={(dataloggerDriverId) => setDraft((current) => ({ ...current, dataloggerDriverId }))}
+            />
             <SettingsEditor
               label="Datalogger"
               value={draft.datalogger}
-              schema={dataloggerDriver?.validation}
+              schema={schemaOf(dataloggerDrivers, draft.dataloggerDriverId)}
               onChange={(datalogger) => setDraft((current) => ({ ...current, datalogger }))}
             />
           </SectionCard>
@@ -273,10 +350,16 @@ export function LibraryNewPage() {
                 onChange={(event) => setDraft((current) => ({ ...current, sensorName: event.target.value }))}
               />
             </label>
+            <DriverPicker
+              label="Sensor driver"
+              drivers={sensorDrivers}
+              value={draft.sensorDriverId}
+              onChange={(sensorDriverId) => setDraft((current) => ({ ...current, sensorDriverId }))}
+            />
             <SettingsEditor
               label="Sensor"
               value={draft.sensor}
-              schema={sensorDriver?.validation}
+              schema={schemaOf(sensorDrivers, draft.sensorDriverId)}
               onChange={(sensor) => setDraft((current) => ({ ...current, sensor }))}
             />
           </SectionCard>
@@ -293,7 +376,7 @@ export function LibraryNewPage() {
                 onClick={() =>
                   setDraft((current) => ({
                     ...current,
-                    sensors: [...current.sensors, { name: "", config: { type: "" } }],
+                    sensors: [...current.sensors, { name: "", config: { type: "" }, driverId: "" }],
                   }))
                 }
               >
@@ -330,10 +413,16 @@ export function LibraryNewPage() {
                         Remove sensor {index + 1}
                       </button>
                     </div>
+                    <DriverPicker
+                      label={`Sensor ${index + 1} driver`}
+                      drivers={sensorDrivers}
+                      value={sensor.driverId}
+                      onChange={(driverId) => setSensor(index, { driverId })}
+                    />
                     <SettingsEditor
                       label={`Sensor ${index + 1}`}
                       value={sensor.config}
-                      schema={sensorDriver?.validation}
+                      schema={schemaOf(sensorDrivers, sensor.driverId)}
                       onChange={(config) => setSensor(index, { config })}
                     />
                   </div>
@@ -353,15 +442,42 @@ export function LibraryNewPage() {
           ) : null}
           {error ? <p className="text-xs text-red-500">{error.message}</p> : null}
           <div className="flex gap-2">
-            <button type="submit" className="btn btn-primary" disabled={busy || problems.length > 0}>
-              {busy ? <Spinner /> : "Create library config"}
+            <button type="submit" className="btn btn-primary" disabled={busy || notOwner || problems.length > 0}>
+              {busy ? <Spinner /> : edit ? `Publish v${nextVersion}` : "Create library config"}
             </button>
-            <Link to="/library" className="btn btn-ghost">
+            <Link to={backTo} className="btn btn-ghost">
               Cancel
             </Link>
           </div>
         </div>
       </form>
     </div>
+  );
+}
+
+/** Which driver a config is for; its schema shapes the editor and the API checks against it. */
+function DriverPicker({
+  label,
+  drivers,
+  value,
+  onChange,
+}: {
+  label: string;
+  drivers: Driver[];
+  value: string;
+  onChange: (id: string) => void;
+}) {
+  return (
+    <label className="mb-3 block max-w-xs text-xs text-fg-muted">
+      {label}
+      <select className="field mt-1" value={value} onChange={(event) => onChange(event.target.value)}>
+        <option value="">{drivers.length ? "Choose a driver" : "No drivers available"}</option>
+        {drivers.map((driver) => (
+          <option key={driver.id} value={driver.id}>
+            {driver.name}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }

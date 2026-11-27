@@ -17,6 +17,7 @@ import type { ConfigSource } from "@/api/deviceLink";
 import { SectionCard } from "@/components/SectionCard";
 import {
   type ApplyPlan,
+  type ApplySource,
   type ApplyStep,
   MAX_SENSOR_ID_LENGTH,
   type SerialConnection,
@@ -167,14 +168,18 @@ export function LibraryApplyTab({
   ): Promise<SyncOutcome[]> => {
     const board = await readBoardConfig(client!);
     const outcomes: SyncOutcome[] = [];
+    // Recorded with the drivers the applied config was saved with.
+    const drivers = driversOf(source);
     for (const id of objects.removed) outcomes.push(await link.syncSensorRemoval(id));
     if (objects.datalogger && board.datalogger) {
-      outcomes.push(await link.syncDatalogger(board.datalogger, undefined, from));
+      outcomes.push(await link.syncDatalogger(board.datalogger, undefined, from, drivers.datalogger));
       void serial.refreshDatalogger().catch(() => undefined);
     }
     for (const id of objects.sensorIds) {
       const reported = board.sensors.find((sensor) => String(sensor.id).toLowerCase() === id.toLowerCase());
-      if (reported) outcomes.push(await link.syncSensor(reported, undefined, from));
+      if (reported) {
+        outcomes.push(await link.syncSensor(reported, undefined, from, drivers.sensors.get(id.toLowerCase())));
+      }
     }
     void queryClient.invalidateQueries({ queryKey: ["config", "active"] });
     return outcomes;
@@ -651,4 +656,20 @@ function AlreadyMatches({
       <FeedbackCallout feedback={feedback} />
     </div>
   );
+}
+
+/** The drivers an applied config was saved with, by board sensor id. */
+function driversOf(source: ApplySource | null): { datalogger?: string; sensors: Map<string, string> } {
+  const sensors = new Map<string, string>();
+  if (!source) return { sensors };
+  if (source.kind === "sensor") {
+    if (source.sensor.driverId) sensors.set(source.sensor.id.toLowerCase(), source.sensor.driverId);
+    return { sensors };
+  }
+  if (source.kind === "system") {
+    for (const sensor of source.sensors) {
+      if (sensor.driverId) sensors.set(sensor.id.toLowerCase(), sensor.driverId);
+    }
+  }
+  return { datalogger: source.dataloggerDriverId, sensors };
 }

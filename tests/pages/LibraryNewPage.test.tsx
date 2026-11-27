@@ -59,6 +59,9 @@ describe("LibraryNewPage", () => {
 
     await user.type(screen.getByLabelText("Name"), "ph-probe");
     await user.type(screen.getByLabelText(/Sensor name/), "ph01");
+    // The user picks the driver this config is for.
+    expect(screen.getByText("Sensor: choose a driver.")).toBeInTheDocument();
+    await user.selectOptions(await screen.findByLabelText("Sensor driver"), "sd");
     // Type is required for a sensor.
     expect(screen.getByText("Sensor: a sensor type is required.")).toBeInTheDocument();
     await user.type(screen.getByLabelText("Type"), "ph");
@@ -74,6 +77,7 @@ describe("LibraryNewPage", () => {
       name: "ph-probe",
       firmwareVersion: "1.4.0",
       sensorName: "ph01",
+      sensorDriverId: "sd",
       config: { type: "ph", wait_time: 5 },
     });
   });
@@ -96,6 +100,7 @@ describe("LibraryNewPage", () => {
     renderWithProviders(page, { route: "/library/new" });
 
     await user.type(screen.getByLabelText("Name"), "station");
+    await user.selectOptions(await screen.findByLabelText("Datalogger driver"), "dd");
     const datalogger = screen.getByRole("group", { name: "Datalogger settings" });
     await user.click(within(datalogger).getByRole("button", { name: "JSON" }));
     const json = within(datalogger).getByLabelText("Datalogger JSON");
@@ -105,6 +110,7 @@ describe("LibraryNewPage", () => {
 
     await user.click(screen.getByRole("button", { name: "Add sensor" }));
     await user.type(screen.getByLabelText(/Sensor 1 name/), "temp01");
+    await user.selectOptions(screen.getByLabelText("Sensor 1 driver"), "sd");
     const sensor = screen.getByRole("group", { name: "Sensor 1 settings" });
     await user.type(within(sensor).getByLabelText("Type"), "ds18b20");
     await user.click(screen.getByLabelText("Make it public"));
@@ -113,8 +119,9 @@ describe("LibraryNewPage", () => {
     expect(await screen.findByText("Created page")).toBeInTheDocument();
     expect(created).toHaveBeenCalledWith({
       name: "station",
+      dataloggerDriverId: "dd",
       datalogger: { site_name: "SITE-A", sleep_interval: 15 },
-      sensors: [{ type: "ds18b20", name: "temp01" }],
+      sensors: [{ type: "ds18b20", name: "temp01", sensorDriverId: "sd" }],
     });
     expect(patched).toHaveBeenCalledWith({ isPublic: true });
   });
@@ -131,7 +138,11 @@ describe("LibraryNewPage", () => {
           isPublic: true,
           createdAt: "2026-01-01T00:00:00Z",
           DataloggerLibraryConfigVersion: [
-            { version: 2, firmwareVersion: "1.5.0", DataloggerConfig: { id: "c", name: "datalogger", config: { sleep_interval: 30 } } },
+            {
+              version: 2,
+              firmwareVersion: "1.5.0",
+              DataloggerConfig: { id: "c", name: "datalogger", config: { sleep_interval: 30 }, dataloggerDriverId: "dd" },
+            },
           ],
         }),
       ),
@@ -147,6 +158,8 @@ describe("LibraryNewPage", () => {
     expect(interval).toHaveValue(30);
     expect(screen.getByLabelText("What it configures")).toBeDisabled();
     expect(screen.getByLabelText("Firmware version (optional)")).toHaveValue("1.5.0");
+    // The copy keeps the version's driver.
+    await waitFor(() => expect(screen.getByLabelText("Datalogger driver")).toHaveValue("dd"));
 
     await user.clear(interval);
     await user.type(interval, "60");
@@ -156,9 +169,75 @@ describe("LibraryNewPage", () => {
       expect(created).toHaveBeenCalledWith({
         name: "my-dl",
         firmwareVersion: "1.5.0",
+        dataloggerDriverId: "dd",
         config: { sleep_interval: 60 },
       }),
     );
+  });
+
+  const sensorConfig = (isMine: boolean) =>
+    http.get(`${api}/sensor/libraryConfig/s1`, () =>
+      HttpResponse.json({
+        id: "s1",
+        name: "creek-temp",
+        isPublic: false,
+        isMine,
+        createdAt: "2026-01-01T00:00:00Z",
+        SensorLibraryConfigVersion: [
+          {
+            version: 1,
+            SensorConfig: { id: "c1", name: "temp01", config: { type: "ds18b20", wait_time: 5 }, sensorDriverId: "sd" },
+          },
+          {
+            version: 2,
+            firmwareVersion: "1.5.0",
+            SensorConfig: { id: "c2", name: "temp01", config: { type: "ds18b20", wait_time: 10 }, sensorDriverId: "sd" },
+          },
+        ],
+      }),
+    );
+
+  it("edits one of your versions into the next version of the same config", async () => {
+    const user = userEvent.setup();
+    const published = vi.fn();
+    server.use(
+      ...drivers(),
+      sensorConfig(true),
+      http.post(`${api}/sensor/libraryConfig/s1/version`, async ({ request }) => {
+        published(await request.json());
+        return new HttpResponse(null, { status: 201 });
+      }),
+    );
+    renderWithProviders(page, { route: "/library/new?edit=sensor:s1:1" });
+
+    expect(await screen.findByRole("heading", { name: "New version of creek-temp" })).toBeInTheDocument();
+    expect(screen.getByText(/Starting from v1\. Publishing adds v3/)).toBeInTheDocument();
+    // A new version keeps the config's name and visibility.
+    expect(screen.queryByLabelText("Name")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Make it public")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText("Sensor driver")).toHaveValue("sd"));
+
+    const wait = await screen.findByLabelText("Wait time");
+    expect(wait).toHaveValue(5);
+    await user.clear(wait);
+    await user.type(wait, "20");
+    await user.type(screen.getByLabelText("Version note (optional)"), "slower");
+    await user.click(screen.getByRole("button", { name: "Publish v3" }));
+
+    expect(await screen.findByText("Created page")).toBeInTheDocument();
+    expect(published).toHaveBeenCalledWith({
+      description: "slower",
+      sensorName: "temp01",
+      sensorDriverId: "sd",
+      config: { type: "ds18b20", wait_time: 20 },
+    });
+  });
+
+  it("doesn't let anyone but the owner add versions", async () => {
+    server.use(...drivers(), sensorConfig(false));
+    renderWithProviders(page, { route: "/library/new?edit=sensor:s1:2" });
+    expect(await screen.findByText(/Only the config's owner can add versions/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Publish v3" })).toBeDisabled();
   });
 
   it("shows why the API refused it", async () => {
@@ -171,6 +250,7 @@ describe("LibraryNewPage", () => {
     );
     renderWithProviders(page, { route: "/library/new?kind=datalogger" });
     await user.type(screen.getByLabelText("Name"), "dl-bad");
+    await user.selectOptions(await screen.findByLabelText("Datalogger driver"), "dd");
     await user.click(screen.getByRole("button", { name: "Create library config" }));
     expect(await screen.findByText("invalid datalogger config received")).toBeInTheDocument();
   });

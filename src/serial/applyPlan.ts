@@ -21,6 +21,8 @@ import type { SerialClient, SerialRecord } from "./protocol";
 export interface ConfigSensor {
   id: string;
   config: SerialRecord;
+  /** The driver the config was saved with; its cloud record uses it too. */
+  driverId?: string;
 }
 
 /**
@@ -31,8 +33,13 @@ export interface ConfigSensor {
  * - `sensor`: one sensor, added or updated; other sensors are left alone.
  */
 export type ApplySource =
-  | { kind: "system"; datalogger: SerialRecord | null; sensors: ConfigSensor[] }
-  | { kind: "datalogger"; datalogger: SerialRecord }
+  | {
+      kind: "system";
+      datalogger: SerialRecord | null;
+      dataloggerDriverId?: string;
+      sensors: ConfigSensor[];
+    }
+  | { kind: "datalogger"; datalogger: SerialRecord; dataloggerDriverId?: string }
   | { kind: "sensor"; sensor: ConfigSensor };
 
 /** The board's current config, as it reports it. */

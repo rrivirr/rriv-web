@@ -73,12 +73,15 @@ export interface ConfigSourceInfo {
 export interface ActiveConfig {
   dataloggerConfig: {
     config?: Record<string, unknown>;
+    /** The driver the datalogger config is recorded with. */
+    dataloggerDriverId?: string | null;
     source?: ConfigSourceInfo | null;
   } | null;
   sensorConfig: {
     id: string;
     name: string;
     config: Record<string, unknown>;
+    sensorDriverId?: string;
     source?: ConfigSourceInfo | null;
   }[];
 }
@@ -162,8 +165,17 @@ export interface LibraryVersionConfigRef {
 export interface LibrarySnapshotRef {
   id: string;
   name: string;
-  SensorConfig: { id: string; name: string; config: Record<string, unknown> }[];
-  DataloggerConfig: { id: string; config: Record<string, unknown> }[];
+  SensorConfig: {
+    id: string;
+    name: string;
+    config: Record<string, unknown>;
+    sensorDriverId?: string;
+  }[];
+  DataloggerConfig: {
+    id: string;
+    config: Record<string, unknown>;
+    dataloggerDriverId?: string;
+  }[];
 }
 
 /** One published version of a library config. */

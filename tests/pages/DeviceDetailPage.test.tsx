@@ -208,12 +208,13 @@ describe("DeviceDetailPage", () => {
     server.use(
       http.get(`${api}/configSnapshot/active`, () =>
         HttpResponse.json({
-          dataloggerConfig: { config: { site_name: "SITE-A" }, source: null },
+          dataloggerConfig: { config: { site_name: "SITE-A" }, dataloggerDriverId: "dd", source: null },
           sensorConfig: [
             {
               id: "s1",
               name: "ph01",
               config: { type: "ph", wait_time: 3 },
+              sensorDriverId: "sd",
               source: {
                 kind: "sensor",
                 versionId: "v3id",
@@ -256,6 +257,7 @@ describe("DeviceDetailPage", () => {
     expect(created).toHaveBeenCalledWith({
       name: "site-a",
       firmwareVersion: "1.2.3",
+      dataloggerDriverId: "dd",
       config: { site_name: "SITE-A" },
     });
   });

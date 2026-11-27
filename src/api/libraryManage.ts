@@ -7,7 +7,9 @@ import type { LibraryConfigSummary } from "./types";
 /** What gets published: a device's (or saved snapshot's) datalogger and sensors. */
 export interface PublishContent {
   datalogger: Record<string, unknown> | null;
-  sensors: { name: string; config: Record<string, unknown> }[];
+  /** The driver the datalogger config is recorded with. */
+  dataloggerDriverId?: string | null;
+  sensors: { name: string; config: Record<string, unknown>; driverId?: string | null }[];
 }
 
 /** Which part of the content goes into the library. */
@@ -18,8 +20,9 @@ export type PublishScope =
 
 /**
  * The request body for a new library config (`version: false`) or a new
- * version of one (`version: true`), in each library's own shape. `null` when
- * the content doesn't have what the scope needs.
+ * version of one (`version: true`), in each library's own shape, with the
+ * driver each object is recorded with. `null` when the content doesn't have
+ * what the scope needs (including a driver).
  */
 export function publishBody(
   scope: PublishScope,
@@ -33,17 +36,28 @@ export function publishBody(
     ...(extras.firmwareVersion ? { firmwareVersion: extras.firmwareVersion } : {}),
   };
   if (scope.kind === "datalogger") {
-    return content.datalogger ? { ...common, config: content.datalogger } : null;
+    return content.datalogger && content.dataloggerDriverId
+      ? { ...common, dataloggerDriverId: content.dataloggerDriverId, config: content.datalogger }
+      : null;
   }
   if (scope.kind === "sensor") {
     const sensor = content.sensors.find((entry) => entry.name === scope.sensorName);
-    return sensor ? { ...common, sensorName: sensor.name, config: sensor.config } : null;
+    return sensor?.driverId
+      ? { ...common, sensorName: sensor.name, sensorDriverId: sensor.driverId, config: sensor.config }
+      : null;
   }
   if (!content.datalogger && !content.sensors.length) return null;
+  // Every object needs the driver it's recorded with.
+  if (!content.dataloggerDriverId || content.sensors.some((sensor) => !sensor.driverId)) return null;
   return {
     ...common,
+    dataloggerDriverId: content.dataloggerDriverId,
     datalogger: content.datalogger ?? {},
-    sensors: content.sensors.map((sensor) => ({ ...sensor.config, name: sensor.name })),
+    sensors: content.sensors.map((sensor) => ({
+      ...sensor.config,
+      name: sensor.name,
+      sensorDriverId: sensor.driverId,
+    })),
   };
 }
 

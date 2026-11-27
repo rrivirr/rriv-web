@@ -117,6 +117,10 @@ describe("LibraryConfigPage", () => {
     );
     renderWithProviders(page, { route: "/library/sensor/l1" });
 
+    expect(await screen.findByRole("link", { name: "Edit v1 as a new version" })).toHaveAttribute(
+      "href",
+      "/library/new?edit=sensor:l1:1",
+    );
     await user.click(await screen.findByRole("button", { name: "Make public" }));
     await waitFor(() => expect(patches).toContainEqual({ isPublic: true }));
 
@@ -151,5 +155,6 @@ describe("LibraryConfigPage", () => {
     renderWithProviders(page, { route: "/library/sensor/l1" });
     await screen.findByText("ph-standard");
     expect(screen.queryByRole("button", { name: /Make (public|private)/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /as a new version/ })).not.toBeInTheDocument();
   });
 });

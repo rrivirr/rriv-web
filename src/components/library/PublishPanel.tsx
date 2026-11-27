@@ -68,6 +68,12 @@ export function PublishPanel({
     firmwareVersion,
   };
   const body = publishBody(scope, content, extras, target === "version");
+  const hasContent =
+    kind === "datalogger"
+      ? content.datalogger !== null
+      : kind === "sensor"
+        ? content.sensors.some((sensor) => sensor.name === sensorName)
+        : content.datalogger !== null || content.sensors.length > 0;
   const problems = [
     target === "new" ? nameProblem(name, "Name") : null,
     nameProblem(description, target === "new" ? "Description" : "Version note", true),
@@ -213,7 +219,11 @@ export function PublishPanel({
           ? `Recorded as made with firmware ${firmwareVersion}.`
           : "No firmware version is recorded, so applying it won't warn about firmware differences."}
       </p>
-      {!body ? <p className="text-xs text-amber-600">There's nothing of this kind to publish.</p> : null}
+      {!body ? (
+        <p className="text-xs text-amber-600">
+          {hasContent ? "This config has no driver recorded, so it can't be published." : "There's nothing of this kind to publish."}
+        </p>
+      ) : null}
       {/* Only once something is typed: an empty required name just disables Publish. */}
       {problems
         .filter((problem) => !problem.endsWith("is required."))

@@ -150,11 +150,16 @@ export function applySourceFromVersion(
   }
   if (kind === "datalogger") {
     const config = version.DataloggerConfig;
-    return config ? { kind: "datalogger", datalogger: config.config } : null;
+    return config
+      ? { kind: "datalogger", datalogger: config.config, dataloggerDriverId: config.dataloggerDriverId }
+      : null;
   }
   const config = version.SensorConfig;
   return config
-    ? { kind: "sensor", sensor: { id: sensorId ?? config.name, config: config.config } }
+    ? {
+        kind: "sensor",
+        sensor: { id: sensorId ?? config.name, config: config.config, driverId: config.sensorDriverId },
+      }
     : null;
 }
 
@@ -168,9 +173,11 @@ export function applySourceFromSnapshot(
   return {
     kind: "system",
     datalogger: snapshot.DataloggerConfig?.[0]?.config ?? null,
+    dataloggerDriverId: snapshot.DataloggerConfig?.[0]?.dataloggerDriverId,
     sensors: (snapshot.SensorConfig ?? []).map((sensor) => ({
       id: sensor.name,
       config: sensor.config,
+      driverId: sensor.sensorDriverId,
     })),
   };
 }

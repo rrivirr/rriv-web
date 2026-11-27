@@ -1127,11 +1127,25 @@ describe("DeviceConnectionPage", () => {
             id: "snap2",
             name: "well-standard",
             DataloggerConfig: [
-              { id: "dc1", config: { object: "datalogger", site_name: "SITE-B", mode: "field" } },
+              {
+                id: "dc1",
+                config: { object: "datalogger", site_name: "SITE-B", mode: "field" },
+                dataloggerDriverId: "lib-dd",
+              },
             ],
             SensorConfig: [
-              { id: "sc1", name: "temp01", config: { object: "sensor", type: "ds18b20", wait_time: 9 } },
-              { id: "sc2", name: "co2", config: { object: "sensor", type: "k30_co2", wait_time: 2 } },
+              {
+                id: "sc1",
+                name: "temp01",
+                config: { object: "sensor", type: "ds18b20", wait_time: 9 },
+                sensorDriverId: "lib-sd-temp",
+              },
+              {
+                id: "sc2",
+                name: "co2",
+                config: { object: "sensor", type: "k30_co2", wait_time: 2 },
+                sensorDriverId: "lib-sd-co2",
+              },
             ],
           },
         },
@@ -1365,6 +1379,14 @@ describe("DeviceConnectionPage", () => {
         "co2",
         "temp01",
       ]);
+      // Recorded with the drivers the version was saved with, not the first driver.
+      expect(dataloggerSynced).toHaveBeenCalledWith(expect.objectContaining({ dataloggerDriverId: "lib-dd" }));
+      const driverOf = (name: string) =>
+        (sensorSynced.mock.calls.find(([body]) => (body as { name: string }).name === name)![0] as {
+          sensorDriverId: string;
+        }).sensorDriverId;
+      expect(driverOf("temp01")).toBe("lib-sd-temp");
+      expect(driverOf("co2")).toBe("lib-sd-co2");
     });
 
     it("offers to record a matching board as on the version, then says it's applied", async () => {

@@ -440,7 +440,12 @@ const publishContent = (data: ActiveConfig) => ({
     data.dataloggerConfig?.config && Object.keys(data.dataloggerConfig.config).length
       ? data.dataloggerConfig.config
       : null,
-  sensors: data.sensorConfig.map((sensor) => ({ name: sensor.name, config: sensor.config })),
+  dataloggerDriverId: data.dataloggerConfig?.dataloggerDriverId ?? null,
+  sensors: data.sensorConfig.map((sensor) => ({
+    name: sensor.name,
+    config: sensor.config,
+    driverId: sensor.sensorDriverId ?? null,
+  })),
 });
 
 /** "Based on ph-probe v3 · 2 settings changed · v4 available". */

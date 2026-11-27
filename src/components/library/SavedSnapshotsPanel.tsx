@@ -131,7 +131,12 @@ function SavedSnapshotRow({ snapshot }: { snapshot: SavedSnapshot }) {
           wholeDeviceOnly
           content={{
             datalogger: snapshot.DataloggerConfig[0]?.config ?? null,
-            sensors: snapshot.SensorConfig.map((sensor) => ({ name: sensor.name, config: sensor.config })),
+            dataloggerDriverId: snapshot.DataloggerConfig[0]?.dataloggerDriverId ?? null,
+            sensors: snapshot.SensorConfig.map((sensor) => ({
+              name: sensor.name,
+              config: sensor.config,
+              driverId: sensor.sensorDriverId ?? null,
+            })),
           }}
           onClose={() => setMode("view")}
         />
