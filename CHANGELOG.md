@@ -1,3 +1,9 @@
+# [1.5.0](https://github.com/rrivirr/rriv-web/compare/v1.4.0...v1.5.0) (2026-11-27)
+
+### Features
+
+* create new library version from existing version and support drivers with library config ([e252069](https://github.com/rrivirr/rriv-web/commit/e252069f297704109946782bc4629b9a31b965f0))
+
 # [1.4.0](https://github.com/rrivirr/rriv-web/compare/v1.3.1...v1.4.0) (2026-11-24)
 
 ### Features
