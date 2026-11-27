@@ -1,3 +1,9 @@
+# [1.4.0](https://github.com/rrivirr/rriv-web/compare/v1.3.1...v1.4.0) (2026-11-24)
+
+### Features
+
+* config management implementation ([70865f4](https://github.com/rrivirr/rriv-web/commit/70865f43c567ad45605f0603c57fd502f0b7dc63))
+
 ## [1.3.1](https://github.com/rrivirr/rriv-web/compare/v1.3.0...v1.3.1) (2026-11-17)
 
 ### Bug Fixes
